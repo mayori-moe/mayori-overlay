@@ -1,80 +1,15 @@
-diff --git a/src/comgr-compiler.cpp b/src/comgr-compiler.cpp
-index 8210291..57371c7 100644
---- a/src/comgr-compiler.cpp
-+++ b/src/comgr-compiler.cpp
-@@ -70,6 +70,7 @@
- #include "llvm/MC/MCCodeEmitter.h"
- #include "llvm/MC/MCContext.h"
- #include "llvm/MC/MCInstrInfo.h"
-+#include "llvm/MC/MCInstPrinter.h"
- #include "llvm/MC/MCObjectFileInfo.h"
- #include "llvm/MC/MCObjectWriter.h"
- #include "llvm/MC/MCParser/MCAsmParser.h"
-@@ -462,8 +463,9 @@ bool executeAssemblerImpl(AssemblerInvocation &Opts, DiagnosticsEngine &Diags,
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8324372..b48da69 100755
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -18,8 +18,8 @@ option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
+ set(CMAKE_CXX_STANDARD 17)
+ set(CMAKE_CXX_STANDARD_REQUIRED True)
  
-   // FIXME: There is a bit of code duplication with addPassesToEmitFile.
-   if (Opts.OutputType == AssemblerInvocation::FT_Asm) {
--    MCInstPrinter *IP = TheTarget->createMCInstPrinter(
--        llvm::Triple(Opts.Triple), Opts.OutputAsmVariant, *MAI, *MCII, *MRI);
-+    std::unique_ptr<MCInstPrinter> IP;
-+    IP.reset(TheTarget->createMCInstPrinter(
-+        llvm::Triple(Opts.Triple), Opts.OutputAsmVariant, *MAI, *MCII, *MRI));
-     std::unique_ptr<MCCodeEmitter> MCE;
-     std::unique_ptr<MCAsmBackend> MAB;
-     if (Opts.ShowEncoding) {
-@@ -472,7 +474,7 @@ bool executeAssemblerImpl(AssemblerInvocation &Opts, DiagnosticsEngine &Diags,
-       MAB.reset(TheTarget->createMCAsmBackend(*STI, *MRI, Options));
-     }
-     auto FOut = std::make_unique<formatted_raw_ostream>(*Out);
--    Str.reset(TheTarget->createAsmStreamer(Ctx, std::move(FOut), IP,
-+    Str.reset(TheTarget->createAsmStreamer(Ctx, std::move(FOut), std::move(IP),
-                                            std::move(MCE), std::move(MAB)));
-   } else if (Opts.OutputType == AssemblerInvocation::FT_Null) {
-     Str.reset(createNullStreamer(Ctx));
-@@ -653,9 +655,9 @@ void logArgv(raw_ostream &OS, StringRef ProgramName,
- amd_comgr_status_t executeCommand(const Command &Job, raw_ostream &LogS,
-                                   DiagnosticOptions &DiagOpts,
-                                   llvm::vfs::FileSystem &FS) {
--  TextDiagnosticPrinter DiagClient(LogS, &DiagOpts);
-+  TextDiagnosticPrinter DiagClient(LogS, DiagOpts);
-   IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs);
--  DiagnosticsEngine Diags(DiagID, &DiagOpts, &DiagClient, false);
-+  DiagnosticsEngine Diags(DiagID, DiagOpts, &DiagClient, false);
+-set(ADDITIONAL_SHARED_LIBRARIES_TO_LINK
+-  libstdc++fs.so)
++#set(ADDITIONAL_SHARED_LIBRARIES_TO_LINK
++#  libstdc++fs.so)
  
-   auto Arguments = Job.getArguments();
-   SmallVector<const char *, 128> Argv;
-@@ -750,20 +752,20 @@ AMDGPUCompiler::executeInProcessDriver(ArrayRef<const char *> Args) {
-   // here is mostly copy-and-pasted from driver.cpp/cc1_main.cpp/various Clang
-   // tests to try to approximate the same behavior as running the `clang`
-   // executable.
--  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts(new DiagnosticOptions);
-+  DiagnosticOptions DiagOpts;
-   unsigned MissingArgIndex, MissingArgCount;
-   InputArgList ArgList = getDriverOptTable().ParseArgs(
-       Args.slice(1), MissingArgIndex, MissingArgCount);
-   // We ignore MissingArgCount and the return value of ParseDiagnosticArgs. Any
-   // errors that would be diagnosed here will also be diagnosed later, when the
-   // DiagnosticsEngine actually exists.
--  (void)ParseDiagnosticArgs(*DiagOpts, ArgList);
-+  (void)ParseDiagnosticArgs(DiagOpts, ArgList);
-   TextDiagnosticPrinter *DiagClient =
--      new TextDiagnosticPrinter(LogS, &*DiagOpts);
-+      new TextDiagnosticPrinter(LogS, DiagOpts);
-   IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs);
--  DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagClient);
-+  DiagnosticsEngine Diags(DiagID, DiagOpts, DiagClient);
- 
--  ProcessWarningOptions(Diags, *DiagOpts, *OverlayFS, /*ReportDiags=*/false);
-+  ProcessWarningOptions(Diags, DiagOpts, *OverlayFS, /*ReportDiags=*/false);
- 
-   Driver TheDriver((Twine(env::getLLVMPath()) + "/bin/clang").str(),
-                    llvm::sys::getDefaultTargetTriple(), Diags,
-@@ -789,7 +791,7 @@ AMDGPUCompiler::executeInProcessDriver(ArrayRef<const char *> Args) {
- 
-   auto Cache = CommandCache::get(LogS);
-   for (auto &Job : C->getJobs()) {
--    ClangCommand C(Job, *DiagOpts, *OverlayFS, executeCommand);
-+    ClangCommand C(Job, DiagOpts, *OverlayFS, executeCommand);
-     if (Cache) {
-       if (auto Status = Cache->execute(C, LogS)) {
-         return Status;
+ set(HIPCC_BIN
+   hipcc)
