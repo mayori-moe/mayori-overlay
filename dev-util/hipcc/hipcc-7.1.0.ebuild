@@ -35,6 +35,10 @@ DEPEND="
 "
 RDEPEND="${DEPEND}"
 
+PATCHES=(
+	"${FILESDIR}/${PN}-7.1.0-musl-compat.patch"
+)
+
 src_unpack() {
 	if [[ ${PV} == *9999 ]] ; then
 		git-r3_fetch

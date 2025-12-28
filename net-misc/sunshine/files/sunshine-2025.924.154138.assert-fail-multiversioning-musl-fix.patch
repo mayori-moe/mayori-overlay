@@ -1,0 +1,21 @@
+diff --git a/src/rswrapper.c b/src/rswrapper.c
+index 5306962..a5a224e 100644
+--- a/src/rswrapper.c
++++ b/src/rswrapper.c
+@@ -38,6 +38,7 @@
+ #define scal DECORATE_FUNC(scal, ISA_SUFFIX)
+ #define gemm DECORATE_FUNC(gemm, ISA_SUFFIX)
+ #define invert_mat DECORATE_FUNC(invert_mat, ISA_SUFFIX)
++#include<assert.h>
+ 
+ #if defined(__x86_64) || defined(__x86_64__) || defined(__amd64) || defined(__amd64__) || defined(_M_AMD64)
+ 
+diff --git a/third-party/nanors/rs.c b/third-party/nanors/rs.c
+index 222cade..cd2dfb1 100644
+--- a/third-party/nanors/rs.c
++++ b/third-party/nanors/rs.c
+@@ -1,4 +1,3 @@
+-#include <assert.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>

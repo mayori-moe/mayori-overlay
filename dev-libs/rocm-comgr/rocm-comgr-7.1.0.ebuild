@@ -28,6 +28,7 @@ PATCHES=(
 	"${FILESDIR}/${PN}-6.4.1-fix-comgr-default-flags.patch"
 	"${FILESDIR}/${PN}-6.1.0-dont-add-nogpulib.patch"
 	"${FILESDIR}/${PN}-7.0.1-llvm-20-compat.patch"
+	"${FILESDIR}/${PN}-7.1.0-llvm-21-compat.patch"
 )
 
 RDEPEND="
