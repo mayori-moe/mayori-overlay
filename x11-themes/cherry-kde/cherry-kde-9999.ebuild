@@ -12,7 +12,7 @@ inherit git-r3
 LICENSE="GPL-3"
 SLOT="0"
 KEYWORDS="~amd64 ~x86"
-IUSE="aurorae konsole +kvantum wallpaper"
+IUSE="+aurorae konsole +kvantum wallpaper"
 
 DEPEND=""
 RDEPEND="
