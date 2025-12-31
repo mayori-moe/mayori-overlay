@@ -45,15 +45,15 @@ src_install() {
 	fi
 
 	if use konsole; then
-		insinto /usr/share/konsole/color-schemes
-		doins color-schemes/Cherry.colors
-		doins colors-schemes/CherryMidnight.colors
+		insinto /usr/share/konsole
+		doins konsole/cherry.colorscheme
+		doins konsole/cherry-midnight.colorscheme
 	fi
 
 	if use kvantum; then
 		insinto /usr/share/Kvantum
-		for variant in cherry{,-midnight}; do
-			doins -r plasma/desktoptheme/${variant}
+		for variant in cherry{,-solid,-midnight{,-solid}}; do
+			doins -r kvantum/${variant}
 		done
 	fi
 
