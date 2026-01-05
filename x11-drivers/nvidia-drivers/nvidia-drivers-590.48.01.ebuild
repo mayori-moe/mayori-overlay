@@ -29,9 +29,7 @@ LICENSE="
 SLOT="0/${PV%%.*}"
 # kept unkeyworded due to being a beta, users are free to opt-in for testing
 KEYWORDS="-* ~amd64 ~arm64"
-IUSE="X abi_x86_32 abi_x86_64 persistenced powerd static-libs tools wayland modules-only"
-
-REQUIRED_USE="modules-only? ( !X !persistenced !powerd !static-libs !tools !wayland )"
+IUSE="+X abi_x86_32 abi_x86_64 persistenced powerd +static-libs +tools wayland"
 
 COMMON_DEPEND="
 	acct-group/video
@@ -59,10 +57,10 @@ COMMON_DEPEND="
 # (may use one or the other depending on setup)
 RDEPEND="
 	${COMMON_DEPEND}
-	!modules-only? ( 
-		dev-libs/openssl:0/3
-		sys-libs/glibc 
-	)
+	dev-libs/openssl:0/3
+	X? ( sys-libs/glibc )
+	wayland? ( sys-libs/glibc )
+	tools? ( sys-libs/glibc )
 	X? (
 		media-libs/libglvnd[X,abi_x86_32(-)?]
 		x11-libs/libX11[abi_x86_32(-)?]
