@@ -13,10 +13,6 @@ NV_URI="https://download.nvidia.com/XFree86/"
 DESCRIPTION="NVIDIA Accelerated Graphics Driver"
 HOMEPAGE="https://www.nvidia.com/"
 SRC_URI="
-	amd64? ( ${NV_URI}Linux-x86_64/${PV}/NVIDIA-Linux-x86_64-${PV}.run )
-	arm64? ( ${NV_URI}Linux-aarch64/${PV}/NVIDIA-Linux-aarch64-${PV}.run )
-	$(printf "${NV_URI}%s/%s-${PV}.tar.bz2 " \
-		nvidia-{installer,modprobe,persistenced,settings,xconfig}{,})
 	${NV_URI}NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-${PV}.tar.xz
 "
 # nvidia-installer is unused but here for GPL-2's "distribute sources"
@@ -29,67 +25,17 @@ LICENSE="
 SLOT="0/${PV%%.*}"
 # kept unkeyworded due to being a beta, users are free to opt-in for testing
 KEYWORDS="-* ~amd64 ~arm64"
-IUSE="+X abi_x86_32 abi_x86_64 persistenced powerd +static-libs +tools wayland"
+IUSE="abi_x86_32 abi_x86_64"
 
 COMMON_DEPEND="
 	acct-group/video
-	X? ( x11-libs/libpciaccess )
-	persistenced? (
-		acct-user/nvpd
-		net-libs/libtirpc:=
-	)
-	tools? (
-		>=app-accessibility/at-spi2-core-2.46:2
-		dev-libs/glib:2
-		dev-libs/jansson:=
-		media-libs/harfbuzz:=
-		x11-libs/cairo
-		x11-libs/gdk-pixbuf:2
-		x11-libs/gtk+:3[X]
-		x11-libs/libX11
-		x11-libs/libXext
-		x11-libs/libXxf86vm
-		x11-libs/pango
-	)
-"
-# egl-wayland2: nvidia currently ships both versions so, to ensure
-# everything works properly, depend on both at same time for now
-# (may use one or the other depending on setup)
+	"
 RDEPEND="
 	${COMMON_DEPEND}
 	dev-libs/openssl:0/3
-	X? ( sys-libs/glibc )
-	wayland? ( sys-libs/glibc )
-	tools? ( sys-libs/glibc )
-	X? (
-		media-libs/libglvnd[X,abi_x86_32(-)?]
-		x11-libs/libX11[abi_x86_32(-)?]
-		x11-libs/libXext[abi_x86_32(-)?]
-	)
-	powerd? ( sys-apps/dbus[abi_x86_32(-)?] )
-	wayland? (
-		>=gui-libs/egl-gbm-1.1.1-r2[abi_x86_32(-)?]
-		>=gui-libs/egl-wayland-1.1.13.1[abi_x86_32(-)?]
-		gui-libs/egl-wayland2[abi_x86_32(-)?]
-		X? ( gui-libs/egl-x11[abi_x86_32(-)?] )
-	)
 "
 DEPEND="
 	${COMMON_DEPEND}
-	static-libs? (
-		x11-base/xorg-proto
-		x11-libs/libX11
-		x11-libs/libXext
-	)
-	tools? (
-		dev-util/vulkan-headers
-		media-libs/libglvnd
-		sys-apps/dbus
-		x11-base/xorg-proto
-		x11-libs/libXrandr
-		x11-libs/libXv
-		x11-libs/libvdpau
-	)
 "
 BDEPEND="
 	app-alternatives/awk
@@ -99,11 +45,6 @@ BDEPEND="
 
 # there is some non-prebuilt exceptions but rather not maintain a list
 QA_PREBUILT="lib/firmware/* usr/bin/* usr/lib*"
-
-PATCHES=(
-	"${FILESDIR}"/nvidia-modprobe-390.141-uvm-perms.patch
-	"${FILESDIR}"/nvidia-settings-530.30.02-desktop.patch
-)
 
 pkg_setup() {
 	use modules && [[ ${MERGE_TYPE} != binary ]] || return
@@ -122,7 +63,6 @@ pkg_setup() {
 		~!PREEMPT_RT
 		~!SLUB_DEBUG_ON
 		!DEBUG_MUTEXES
-		$(usev powerd '~CPU_FREQ')
 	"
 
 	kernel_is -ge 6 11 && linux_chkconfig_present DRM_FBDEV_EMULATION &&
@@ -158,24 +98,9 @@ pkg_setup() {
 
 src_prepare() {
 	# make patches usable across versions
-	rm nvidia-modprobe && mv nvidia-modprobe{-${PV},} || die
-	rm nvidia-persistenced && mv nvidia-persistenced{-${PV},} || die
-	rm nvidia-settings && mv nvidia-settings{-${PV},} || die
-	rm nvidia-xconfig && mv nvidia-xconfig{-${PV},} || die
 	mv NVIDIA-kernel-module-source-${PV} kernel-module-source || die
 
 	default
-
-	sed 's/__USER__/nvpd/' \
-		nvidia-persistenced/init/systemd/nvidia-persistenced.service.template \
-		> "${T}"/nvidia-persistenced.service || die
-
-	# use alternative vulkan icd option if USE=-X (bug #909181)
-	use X || sed -i 's/"libGLX/"libEGL/' nvidia_{layers,icd}.json || die
-
-	# makefile attempts to install wayland library even if not built
-	use wayland || sed -i 's/ WAYLAND_LIB_install$//' \
-		nvidia-settings/src/Makefile || die
 }
 
 src_compile() {
@@ -192,7 +117,7 @@ src_compile() {
 		BUILD_GTK2LIB=
 		NV_USE_BUNDLED_LIBJANSSON=0
 		NV_VERBOSE=1 DO_STRIP= MANPAGE_GZIP= OUTPUTDIR=out
-		WAYLAND_AVAILABLE=$(usex wayland 1 0)
+		WAYLAND_AVAILABLE=1
 		XNVCTRL_CFLAGS="${xnvflags}"
 	)
 
@@ -224,74 +149,47 @@ src_compile() {
 		linux-mod-r1_src_compile
 		CFLAGS=${o_cflags} CXXFLAGS=${o_cxxflags} LDFLAGS=${o_ldflags}
 	fi
-
-	emake "${NV_ARGS[@]}" -C nvidia-modprobe
-	use persistenced && emake "${NV_ARGS[@]}" -C nvidia-persistenced
-	use X && emake "${NV_ARGS[@]}" -C nvidia-xconfig
-
-	if use tools; then
-		# avoid noisy *very* noisy logs with deprecation warnings
-		CFLAGS="-Wno-deprecated-declarations ${CFLAGS}" \
-			emake "${NV_ARGS[@]}" -C nvidia-settings
-	elif use static-libs; then
-		# pretend GTK+3 is available, not actually used (bug #880879)
-		emake "${NV_ARGS[@]}" BUILD_GTK3LIB=1 \
-			-C nvidia-settings/src out/libXNVCtrl.a
-	fi
 }
 
 src_install() {
 	local libdir=$(get_libdir) libdir32=$(ABI=x86 get_libdir)
 
-	NV_ARGS+=( DESTDIR="${D}" LIBDIR="${ED}"/usr/${libdir} )
+#	NV_ARGS+=( DESTDIR="${D}" LIBDIR="${ED}"/usr/${libdir} )
 
-	local -A paths=(
-		[APPLICATION_PROFILE]=/usr/share/nvidia
-		[CUDA_ICD]=/etc/OpenCL/vendors
-		[EGL_EXTERNAL_PLATFORM_JSON]=/usr/share/egl/egl_external_platform.d
-		[FIRMWARE]=/lib/firmware/nvidia/${PV}
-		[GBM_BACKEND_LIB_SYMLINK]=/usr/${libdir}/gbm
-		[GLVND_EGL_ICD_JSON]=/usr/share/glvnd/egl_vendor.d
-		[OPENGL_DATA]=/usr/share/nvidia
-		[VULKANSC_ICD_JSON]=/usr/share/vulkansc
-		[VULKAN_ICD_JSON]=/usr/share/vulkan
-		[WINE_LIB]=/usr/${libdir}/nvidia/wine
-		[XORG_OUTPUTCLASS_CONFIG]=/usr/share/X11/xorg.conf.d
+#	local -A paths=(
+#		[FIRMWARE]=/lib/firmware/nvidia/${PV}
+#	)
 
-		[GLX_MODULE_SHARED_LIB]=/usr/${libdir}/xorg/modules/extensions
-		[GLX_MODULE_SYMLINK]=/usr/${libdir}/xorg/modules
-		[XMODULE_SHARED_LIB]=/usr/${libdir}/xorg/modules
-	)
+#	local skip_files=(
+#		libGLX_nvidia
+#		libglxserver_nvidia
+#		libGLX_indirect # non-glvnd unused fallback
+#		libnvidia-{gtk,wayland-client} nvidia-{settings,xconfig} # from source
+#		libnvidia-egl-gbm 15_nvidia_gbm # gui-libs/egl-gbm
+#		libnvidia-egl-wayland 10_nvidia_wayland # gui-libs/egl-wayland
+#		libnvidia-egl-wayland2 99_nvidia_wayland2 # gui-libs/egl-wayland2
+#		libnvidia-egl-xcb 20_nvidia_xcb.json # gui-libs/egl-x11
+#		libnvidia-egl-xlib 20_nvidia_xlib.json # gui-libs/egl-x11
+#		libnvidia-pkcs11.so # using the openssl3 version instead
+#	)
+#	local skip_modules=(
+#		nvfbc vdpau xdriver
+#		#$(usev !modules gsp)
+#		nvtopps
+#		installer nvpd # handled separately / built from source
+#	)
+#	local skip_types=(
+#		GLVND_LIB GLVND_SYMLINK EGL_CLIENT.\* GLX_CLIENT.\* # media-libs/libglvnd
+#		OPENCL_WRAPPER.\* # virtual/opencl
+#		DOCUMENTATION DOT_DESKTOP .\*_SRC DKMS_CONF SYSTEMD_UNIT # handled separately / unused
+#	)
 
-	local skip_files=(
-		$(usev !X "libGLX_nvidia libglxserver_nvidia")
-		libGLX_indirect # non-glvnd unused fallback
-		libnvidia-{gtk,wayland-client} nvidia-{settings,xconfig} # from source
-		libnvidia-egl-gbm 15_nvidia_gbm # gui-libs/egl-gbm
-		libnvidia-egl-wayland 10_nvidia_wayland # gui-libs/egl-wayland
-		libnvidia-egl-wayland2 99_nvidia_wayland2 # gui-libs/egl-wayland2
-		libnvidia-egl-xcb 20_nvidia_xcb.json # gui-libs/egl-x11
-		libnvidia-egl-xlib 20_nvidia_xlib.json # gui-libs/egl-x11
-		libnvidia-pkcs11.so # using the openssl3 version instead
-	)
-	local skip_modules=(
-		$(usev !X "nvfbc vdpau xdriver")
-		$(usev !modules gsp)
-		$(usev !powerd nvtopps)
-		installer nvpd # handled separately / built from source
-	)
-	local skip_types=(
-		GLVND_LIB GLVND_SYMLINK EGL_CLIENT.\* GLX_CLIENT.\* # media-libs/libglvnd
-		OPENCL_WRAPPER.\* # virtual/opencl
-		DOCUMENTATION DOT_DESKTOP .\*_SRC DKMS_CONF SYSTEMD_UNIT # handled separately / unused
-	)
-
-	local DOCS=(
-		README.txt NVIDIA_Changelog supported-gpus/supported-gpus.json
-		nvidia-settings/doc/{FRAMELOCK,NV-CONTROL-API}.txt
-	)
-	local HTML_DOCS=( html/. )
-	einstalldocs
+	#local DOCS=(
+		#README.txt NVIDIA_Changelog supported-gpus/supported-gpus.json
+		#nvidia-settings/doc/{FRAMELOCK,NV-CONTROL-API}.txt
+	#)
+	#local HTML_DOCS=( html/. )
+	#einstalldocs
 
 	local DISABLE_AUTOFORMATTING=yes
 	local DOC_CONTENTS="\
@@ -327,153 +225,118 @@ documentation that is installed alongside this README."
 
 		insinto /etc/modprobe.d
 		newins "${FILESDIR}"/nvidia-590.conf nvidia.conf
-
-		# used for gpu verification with binpkgs (not kept, see pkg_preinst)
-		insinto /usr/share/nvidia
-		doins supported-gpus/supported-gpus.json
 	fi
-
-	emake "${NV_ARGS[@]}" -C nvidia-modprobe install
-	fowners :video /usr/bin/nvidia-modprobe #505092
-	fperms 4710 /usr/bin/nvidia-modprobe
-
-	if use persistenced; then
-		emake "${NV_ARGS[@]}" -C nvidia-persistenced install
-		newconfd "${FILESDIR}"/nvidia-persistenced.confd nvidia-persistenced
-		newinitd "${FILESDIR}"/nvidia-persistenced.initd nvidia-persistenced
-		systemd_dounit "${T}"/nvidia-persistenced.service
-	fi
-
-	if use tools; then
-		emake "${NV_ARGS[@]}" -C nvidia-settings install
-
-		doicon nvidia-settings/doc/nvidia-settings.png
-		domenu nvidia-settings/doc/nvidia-settings.desktop
-
-		exeinto /etc/X11/xinit/xinitrc.d
-		newexe "${FILESDIR}"/95-nvidia-settings-r1 95-nvidia-settings
-	fi
-
-	if use static-libs; then
-		dolib.a nvidia-settings/src/out/libXNVCtrl.a
-		strip-lto-bytecode
-
-		insinto /usr/include/NVCtrl
-		doins nvidia-settings/src/libXNVCtrl/NVCtrl{Lib,}.h
-	fi
-
-	use X && emake "${NV_ARGS[@]}" -C nvidia-xconfig install
 
 	# mimic nvidia-installer by reading .manifest to install files
 	# 0:file 1:perms 2:type 3+:subtype/arguments -:module
-	local m into
-	while IFS=' ' read -ra m; do
-		! [[ ${#m[@]} -ge 2 && ${m[-1]} =~ MODULE: ]] ||
-			[[ " ${m[0]##*/}" =~ ^(\ ${skip_files[*]/%/.*|\\} )$ ]] ||
-			[[ " ${m[2]}" =~ ^(\ ${skip_types[*]/%/|\\} )$ ]] ||
-			has ${m[-1]#MODULE:} "${skip_modules[@]}" && continue
-
-		case ${m[2]} in
-			MANPAGE)
-				gzip -dc ${m[0]} | newman - ${m[0]%.gz}
-				pipestatus || die
-				continue
-			;;
-			GBM_BACKEND_LIB_SYMLINK) m[4]=../${m[4]};; # missing ../
-			VDPAU_SYMLINK) m[4]=vdpau/; m[5]=${m[5]#vdpau/};; # .so to vdpau/
-		esac
-
-		if [[ -v 'paths[${m[2]}]' ]]; then
-			into=${paths[${m[2]}]}
-		elif [[ ${m[2]} == EXPLICIT_PATH ]]; then
-			into=${m[3]}
-		elif [[ ${m[2]} == *_BINARY ]]; then
-			into=/usr/bin
-		elif [[ ${m[3]} == COMPAT32 ]]; then
-			use abi_x86_32 || continue
-			into=/usr/${libdir32}
-		elif [[ ${m[2]} == *_@(LIB|SYMLINK) ]]; then
-			into=/usr/${libdir}
-		else
-			die "No known installation path for ${m[0]}"
-		fi
-		[[ ${m[3]: -2} == ?/ ]] && into+=/${m[3]%/}
-		[[ ${m[4]: -2} == ?/ ]] && into+=/${m[4]%/}
-
-		if [[ ${m[2]} =~ _SYMLINK$ ]]; then
-			[[ ${m[4]: -1} == / ]] && m[4]=${m[5]}
-			dosym ${m[4]} ${into}/${m[0]}
-			continue
-		fi
-		# avoid portage warning due to missing soname links in manifest
-		[[ ${m[0]} =~ ^libnvidia-ngx.so ]] &&
-			dosym ${m[0]} ${into}/${m[0]%.so*}.so.1
-
-		printf -v m[1] %o $((m[1] | 0200)) # 444->644
-		insopts -m${m[1]}
-		insinto ${into}
-		doins ${m[0]}
-	done < .manifest || die
-	insopts -m0644 # reset
+#local m into
+#	while IFS=' ' read -ra m; do
+#		! [[ ${#m[@]} -ge 2 && ${m[-1]} =~ MODULE: ]] ||
+#			[[ " ${m[0]##*/}" =~ ^(\ ${skip_files[*]/%/.*|\\} )$ ]] ||
+#			[[ " ${m[2]}" =~ ^(\ ${skip_types[*]/%/|\\} )$ ]] ||
+#			has ${m[-1]#MODULE:} "${skip_modules[@]}" && continue
+#
+#		case ${m[2]} in
+#			MANPAGE)
+#				gzip -dc ${m[0]} | newman - ${m[0]%.gz}
+#				pipestatus || die
+#				continue
+#			;;
+#			GBM_BACKEND_LIB_SYMLINK) m[4]=../${m[4]};; # missing ../
+#			VDPAU_SYMLINK) m[4]=vdpau/; m[5]=${m[5]#vdpau/};; # .so to vdpau/
+#		esac
+#
+#		if [[ -v 'paths[${m[2]}]' ]]; then
+#			into=${paths[${m[2]}]}
+#		elif [[ ${m[2]} == EXPLICIT_PATH ]]; then
+#			into=${m[3]}
+#		elif [[ ${m[2]} == *_BINARY ]]; then
+#			into=/usr/bin
+#		elif [[ ${m[3]} == COMPAT32 ]]; then
+#			use abi_x86_32 || continue
+#			into=/usr/${libdir32}
+#		elif [[ ${m[2]} == *_@(LIB|SYMLINK) ]]; then
+#			into=/usr/${libdir}
+#		else
+#			die "No known installation path for ${m[0]}"
+#		fi
+#		[[ ${m[3]: -2} == ?/ ]] && into+=/${m[3]%/}
+#		[[ ${m[4]: -2} == ?/ ]] && into+=/${m[4]%/}
+#
+#		if [[ ${m[2]} =~ _SYMLINK$ ]]; then
+#			[[ ${m[4]: -1} == / ]] && m[4]=${m[5]}
+#			dosym ${m[4]} ${into}/${m[0]}
+#			continue
+#		fi
+#		# avoid portage warning due to missing soname links in manifest
+#		[[ ${m[0]} =~ ^libnvidia-ngx.so ]] &&
+#			dosym ${m[0]} ${into}/${m[0]%.so*}.so.1
+#
+#		printf -v m[1] %o $((m[1] | 0200)) # 444->644
+#		insopts -m${m[1]}
+#		insinto ${into}
+#		doins ${m[0]}
+#	done || die
+#	insopts -m0644 # reset
 
 	# MODULE:installer non-skipped extras
-	: "$(systemd_get_sleepdir)"
-	exeinto "${_#"${EPREFIX}"}"
-	doexe systemd/system-sleep/nvidia
-	dobin systemd/nvidia-sleep.sh
-	systemd_dounit systemd/system/nvidia-{hibernate,resume,suspend,suspend-then-hibernate}.service
+	#: "$(systemd_get_sleepdir)"
+	#exeinto "${_#"${EPREFIX}"}"
+	#doexe systemd/system-sleep/nvidia
+	#dobin systemd/nvidia-sleep.sh
+	#systemd_dounit systemd/system/nvidia-{hibernate,resume,suspend,suspend-then-hibernate}.service
 
-	dobin nvidia-bug-report.sh
+	#dobin nvidia-bug-report.sh
 
-	insinto /usr/share/nvidia/files.d
-	doins sandboxutils-filelist.json
+	#insinto /usr/share/nvidia/files.d
+	#doins sandboxutils-filelist.json
 
 	# MODULE:powerd extras
-	if use powerd; then
-		newinitd "${FILESDIR}"/nvidia-powerd.initd nvidia-powerd #923117
-		systemd_dounit systemd/system/nvidia-powerd.service
+	#if use powerd; then
+	#	newinitd "${FILESDIR}"/nvidia-powerd.initd nvidia-powerd #923117
+	#	systemd_dounit systemd/system/nvidia-powerd.service
 
-		insinto /usr/share/dbus-1/system.d
-		doins nvidia-dbus.conf
-	fi
+	#	insinto /usr/share/dbus-1/system.d
+	#	doins nvidia-dbus.conf
+	#fi
 
 	# enabling is needed for sleep to work properly and little reason not to do
 	# it unconditionally for a better user experience
-	: "$(systemd_get_systemunitdir)"
-	local unitdir=${_#"${EPREFIX}"}
+	#: "$(systemd_get_systemunitdir)"
+	#local unitdir=${_#"${EPREFIX}"}
 	# not using relative symlinks to match systemd's own links
-	dosym {"${unitdir}",/etc/systemd/system/systemd-hibernate.service.wants}/nvidia-hibernate.service
-	dosym {"${unitdir}",/etc/systemd/system/systemd-hibernate.service.wants}/nvidia-resume.service
-	dosym {"${unitdir}",/etc/systemd/system/systemd-suspend.service.wants}/nvidia-suspend.service
-	dosym {"${unitdir}",/etc/systemd/system/systemd-suspend.service.wants}/nvidia-resume.service
-	dosym {"${unitdir}",/etc/systemd/system/systemd-suspend-then-hibernate.service.wants}/nvidia-suspend-then-hibernate.service
-	dosym {"${unitdir}",/etc/systemd/system/systemd-suspend-then-hibernate.service.wants}/nvidia-resume.service
+	#dosym {"${unitdir}",/etc/systemd/system/systemd-hibernate.service.wants}/nvidia-hibernate.service
+	#dosym {"${unitdir}",/etc/systemd/system/systemd-hibernate.service.wants}/nvidia-resume.service
+	#dosym {"${unitdir}",/etc/systemd/system/systemd-suspend.service.wants}/nvidia-suspend.service
+	#dosym {"${unitdir}",/etc/systemd/system/systemd-suspend.service.wants}/nvidia-resume.service
+	#dosym {"${unitdir}",/etc/systemd/system/systemd-suspend-then-hibernate.service.wants}/nvidia-suspend-then-hibernate.service
+	#dosym {"${unitdir}",/etc/systemd/system/systemd-suspend-then-hibernate.service.wants}/nvidia-resume.service
 	# also add a custom elogind hook to do the equivalent of the above
-	exeinto /usr/lib/elogind/system-sleep
-	newexe "${FILESDIR}"/system-sleep.elogind nvidia
+	#exeinto /usr/lib/elogind/system-sleep
+	#newexe "${FILESDIR}"/system-sleep.elogind nvidia
 	# <elogind-255.5 used a different path (bug #939216), keep a compat symlink
 	# TODO: cleanup after 255.5 been stable for a few months
-	dosym {/usr/lib,/"${libdir}"}/elogind/system-sleep/nvidia
+	#dosym {/usr/lib,/"${libdir}"}/elogind/system-sleep/nvidia
 
 	# needed with >=systemd-256 or may fail to resume with some setups
 	# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1072722
-	insinto "${unitdir}"/systemd-homed.service.d
-	newins - 10-nvidia.conf <<-EOF
-		[Service]
-		Environment=SYSTEMD_HOME_LOCK_FREEZE_SESSION=false
-	EOF
-	insinto "${unitdir}"/systemd-suspend.service.d
-	newins - 10-nvidia.conf <<-EOF
-		[Service]
-		Environment=SYSTEMD_SLEEP_FREEZE_USER_SESSIONS=false
-	EOF
-	dosym -r "${unitdir}"/systemd-{suspend,hibernate}.service.d/10-nvidia.conf
-	dosym -r "${unitdir}"/systemd-{suspend,hybrid-sleep}.service.d/10-nvidia.conf
-	dosym -r "${unitdir}"/systemd-{suspend,suspend-then-hibernate}.service.d/10-nvidia.conf
+	#insinto "${unitdir}"/systemd-homed.service.d
+	#newins - 10-nvidia.conf <<-EOF
+	#	[Service]
+	#	Environment=SYSTEMD_HOME_LOCK_FREEZE_SESSION=false
+	#EOF
+	#insinto "${unitdir}"/systemd-suspend.service.d
+	#newins - 10-nvidia.conf <<-EOF
+#	[Service]
+	#	Environment=SYSTEMD_SLEEP_FREEZE_USER_SESSIONS=false
+	#EOF
+	#dosym -r "${unitdir}"/systemd-{suspend,hibernate}.service.d/10-nvidia.conf
+	#dosym -r "${unitdir}"/systemd-{suspend,hybrid-sleep}.service.d/10-nvidia.conf
+	#dosym -r "${unitdir}"/systemd-{suspend,suspend-then-hibernate}.service.d/10-nvidia.conf
 
 	# symlink non-versioned so nvidia-settings can use it even if misdetected
-	dosym nvidia-application-profiles-${PV}-key-documentation \
-		${paths[APPLICATION_PROFILE]}/nvidia-application-profiles-key-documentation
+	#dosym nvidia-application-profiles-${PV}-key-documentation \
+	#	${paths[APPLICATION_PROFILE]}/nvidia-application-profiles-key-documentation
 
 	# don't attempt to strip firmware files (silences errors)
 	dostrip -x ${paths[FIRMWARE]}
@@ -503,18 +366,18 @@ pkg_preinst() {
 	sed -i "s/@VIDEOGID@/${g}/" "${ED}"/etc/modprobe.d/nvidia.conf || die
 
 	# try to find driver mismatches using temporary supported-gpus.json
-	for g in $(grep -l 0x10de /sys/bus/pci/devices/*/vendor 2>/dev/null); do
-		g=$(grep -io "\"devid\":\"$(<${g%vendor}device)\"[^}]*branch\":\"[0-9]*" \
-			"${ED}"/usr/share/nvidia/supported-gpus.json 2>/dev/null)
-		if [[ ${g} ]]; then
-			g=$((${g##*\"}+1))
-			if ver_test -ge ${g}; then
-				NV_LEGACY_MASK=">=${CATEGORY}/${PN}-${g}"
-				break
-			fi
-		fi
-	done
-	rm "${ED}"/usr/share/nvidia/supported-gpus.json || die
+	#for g in $(grep -l 0x10de /sys/bus/pci/devices/*/vendor 2>/dev/null); do
+	#	g=$(grep -io "\"devid\":\"$(<${g%vendor}device)\"[^}]*branch\":\"[0-9]*" \
+	#		"${ED}"/usr/share/nvidia/supported-gpus.json 2>/dev/null)
+	#	if [[ ${g} ]]; then
+	#		g=$((${g##*\"}+1))
+	#		if ver_test -ge ${g}; then
+	#			NV_LEGACY_MASK=">=${CATEGORY}/${PN}-${g}"
+	#			break
+	#		fi
+	#	fi
+	#done
+	#rm "${ED}"/usr/share/nvidia/supported-gpus.json || die
 }
 
 pkg_postinst() {
