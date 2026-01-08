@@ -15,3 +15,5 @@ I'm running Gentoo with `musl` libc. If you are not using musl, be careful about
 [Fluent-icon-theme](https://github.com/vinceliuice/Fluent-icon-theme) red variant
 
 [Sunshine](https://github.com/LizardByte/Sunshine) fixes for musl
+
+[Valgrind](https://valgrind.org/) fixes for musl based on Chimera Linux [patch](https://github.com/chimera-linux/cports/blob/382e497f40f80e5528d714e6075a00b225459dfa/experimental/valgrind/patches/rtlib.patch)
