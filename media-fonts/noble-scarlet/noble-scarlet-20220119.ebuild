@@ -8,7 +8,7 @@ DESCRIPTION="Deprecated but beautiful Noble Scarlet Font by Microsoft from Windo
 HOMEPAGE="https://learn.microsoft.com/typography/font-list"
 SRC_URI="https://github.com/jlxd/Noble-Scarlet-mod/archive/642feea5cf672bf08471810192a0fa6c32049936.zip -> ${P}.zip"
 
-LICENSE="BINARY-REDISTRIBUTABLE"
+LICENSE="CC-BY-SA-4.0"
 
 SLOT="0"
 KEYWORDS="~alpha ~amd64 ~arm ~arm64 ~loong ~mips ~ppc ~ppc64 ~riscv ~sparc ~x86"
