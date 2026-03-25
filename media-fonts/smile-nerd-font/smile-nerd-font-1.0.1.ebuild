@@ -12,8 +12,8 @@ LICENSE="OFL-1.1"
 
 REQUIRED_USE="|| ( regular light )"
 
-SRC_URI="regular? ( https://github.com/SOV710/smile-nerd-font/releases/download/v${PV}/SmileNerdFontMono-Light.ttf -> ${P}-light.ttf )
-		light? ( https://github.com/SOV710/smile-nerd-font/releases/download/v${PV}/SmileNerdFontMono-Regular.ttf -> ${P}-regular.ttf )"
+SRC_URI="light? ( https://github.com/SOV710/smile-nerd-font/releases/download/v${PV}/SmileNerdFontMono-Light.ttf -> ${P}-light.ttf )
+		regular? ( https://github.com/SOV710/smile-nerd-font/releases/download/v${PV}/SmileNerdFontMono-Regular.ttf -> ${P}-regular.ttf )"
 
 SLOT="0"
 
