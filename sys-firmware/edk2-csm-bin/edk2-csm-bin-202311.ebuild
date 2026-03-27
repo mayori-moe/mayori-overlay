@@ -36,7 +36,3 @@ src_install() {
 	insinto /usr/share
 	doins -r usr/share/{edk2,qemu}/
 }
-
-pkg_postinst() {
-	readme.gentoo_print_elog
-}
