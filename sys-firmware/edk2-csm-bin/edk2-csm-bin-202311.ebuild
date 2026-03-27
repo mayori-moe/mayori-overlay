@@ -3,7 +3,7 @@
 
 EAPI=8
 
-inherit readme.gentoo-r1 secureboot
+inherit readme.gentoo-r1
 
 DESCRIPTION="TianoCore EDK II UEFI firmware with CSM support from Arch Linux archive"
 HOMEPAGE="https://github.com/tianocore/edk2"
