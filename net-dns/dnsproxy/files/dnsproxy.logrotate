@@ -1,8 +1,0 @@
-/var/log/dnsproxy.log {
-	create 0640 root root
-	missingok
-	compress
-	delaycompress
-	notifempty
-	copytruncate
-}
