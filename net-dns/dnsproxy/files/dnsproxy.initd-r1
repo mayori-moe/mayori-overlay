@@ -1,0 +1,29 @@
+#!/sbin/openrc-run
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+extra_started_commands="reload rotate"
+
+command=/usr/bin/dnsproxy
+command_args="--config-path=/etc/dnsproxy/config.yaml"
+pidfile="/var/run/dnsproxy.pid"
+retry="TERM/3/TERM/5"
+
+depend() {
+    provide dns
+    need localmount net
+    after bootmisc
+    use logger
+}
+
+reload() {
+	ebegin "Reloading ${RC_SVCNAME}"
+	start-stop-daemon --signal HUP --pidfile "${pidfile}"
+	eend $?
+}
+
+rotate() {
+	ebegin "Reopening ${RC_SVCNAME} log file"
+	start-stop-daemon --signal USR2 --pidfile "${pidfile}"
+	eend $?
+}
