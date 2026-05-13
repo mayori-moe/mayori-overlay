@@ -8,10 +8,6 @@ command_args="--config-path=/etc/dnsproxy/config.yaml"
 supervisor="supervise-daemon"
 supervise_daemon_args="--respawn-delay 3 --respawn-max 3 --respawn-period 15"
 
-
-output_log="/var/log/dnsproxy.log"
-error_log="/var/log/dnsproxy.log"
-
 pidfile="/var/run/dnsproxy.pid"
 
 depend() {
