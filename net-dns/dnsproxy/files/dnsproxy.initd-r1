@@ -6,7 +6,10 @@ description="dnsproxy service for global dns processing"
 command="/usr/bin/dnsproxy"
 command_args="--config-path=/etc/dnsproxy/config.yaml"
 supervisor="supervise-daemon"
-supervise_daemon_args="--respawn-delay 3 --respawn-max 3 --respawn-period 15"
+supervise_daemon_args="--respawn-delay 2 --respawn-max 3 --respawn-period 10"
+
+output_logger="logger -t dnsproxy"
+error_logger="logger -t dnsproxy"
 
 pidfile="/var/run/dnsproxy.pid"
 
@@ -14,10 +17,10 @@ depend() {
     provide dns
     need localmount net
     after bootmisc
+    use logger
 }
 
 start_pre() {
-    checkpath -f -m 0644 -o root:root "/var/log/dnsproxy.log"
     if [ ! -f "/etc/dnsproxy/config.yaml" ]; then
         eerror "Config file not found!"
         return 1
