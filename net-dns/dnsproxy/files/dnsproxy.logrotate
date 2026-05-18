@@ -1,0 +1,6 @@
+/var/log/dnsproxy.log {
+	create 640 root root
+	notifempty
+	missingok
+	copytruncate
+}

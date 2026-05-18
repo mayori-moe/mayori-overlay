@@ -54,4 +54,6 @@ src_install() {
 	insinto /etc/dnsproxy
 	newins config.yaml.dist config.yaml
 	newinitd "${FILESDIR}/dnsproxy.initd-r1" ${PN}
+	insinto /etc/logrotate.d
+	newins "${FILESDIR}/dnsproxy.logrotate" ${PN}
 }

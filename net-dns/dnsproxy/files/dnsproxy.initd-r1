@@ -5,13 +5,12 @@
 description="dnsproxy service for global dns processing"
 command="/usr/bin/dnsproxy"
 command_args="--config-path=/etc/dnsproxy/config.yaml"
-supervisor="supervise-daemon"
-supervise_daemon_args="--respawn-delay 2 --respawn-max 3 --respawn-period 10"
+command_background=true
 
-output_logger="logger -t dnsproxy"
-error_logger="logger -t dnsproxy"
+pidfile="/var/run/${RC_SVCNAME}.pid"
 
-pidfile="/var/run/dnsproxy.pid"
+output_log="/var/log/${RC_SVCNAME}.log"
+error_log="/var/log/${RC_SVCNAME}.log"
 
 depend() {
     provide dns
