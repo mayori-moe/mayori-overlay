@@ -1,0 +1,12 @@
+diff --git a/src/platform/linux/misc.cpp b/src/platform/linux/misc.cpp
+index 59d031d..3772e02 100644
+--- a/src/platform/linux/misc.cpp
++++ b/src/platform/linux/misc.cpp
+@@ -13,6 +13,7 @@
+ #include <iomanip>
+ #include <iostream>
+ #include <sstream>
++#include <span>
+ 
+ // platform includes
+ #include <arpa/inet.h>

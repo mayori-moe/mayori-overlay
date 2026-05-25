@@ -201,8 +201,11 @@ BDEPEND="
 "
 
 PATCHES=(
+	"${FILESDIR}"/${PN}-2026.516.143833-git-if-needed.patch
 	"${FILESDIR}"/${PN}-new-boost.patch
 	"${FILESDIR}"/${PN}-new-cuda.patch
+	"${FILESDIR}"/${PN}-2025.924.154138.assert-fail-multiversioning-musl-fix.patch
+	"${FILESDIR}"/${PN}-2026.516.143833-std-span-include.patch
 )
 
 # Make this mess a bit simpler.
