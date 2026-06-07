@@ -1,0 +1,51 @@
+diff --git a/cmake/MakeObject.cmake b/cmake/MakeObject.cmake
+index 6a29bde..935ca03 100644
+--- a/cmake/MakeObject.cmake
++++ b/cmake/MakeObject.cmake
+@@ -7,10 +7,20 @@ function(make_object out_var)
+     set(out_f "${out_f}.o")
+     string(REGEX REPLACE "[/.-]" "_" sym_in "${in_f}")
+ 
++    if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
++	set(LLD_EMULATION "elf_x86_64")
++    elseif("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64|arm64")
++	set(LLD_EMULATION "aarch64linux")
++    elseif("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "i.86")
++	set(LLD_EMULATION "elf_i386")
++    else()
++	message(FATAL_ERROR "Unsupported architecture for LLD emulation: ${CMAKE_SYSTEM_PROCESSOR}")
++    endif()
++
+     add_custom_command(OUTPUT ${out_f}
+       COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/${in_f} ${out_f}.tmp
+       COMMAND dd if=/dev/zero bs=1 count=1 of=${out_f}.tmp oflag=append conv=notrunc status=none
+-      COMMAND ${CMAKE_LINKER} -r -b binary -o ${out_f} ${out_f}.tmp
++      COMMAND ${CMAKE_LINKER} -m ${LLD_EMULATION} -r -b binary -o ${out_f} ${out_f}.tmp
+       COMMAND ${CMAKE_OBJCOPY} --rename-section .data=.rodata,CONTENTS,ALLOC,LOAD,READONLY,DATA ${out_f} ${out_f}
+       COMMAND ${CMAKE_OBJCOPY} --redefine-sym _binary_${sym_in}_o_tmp_start=b_${sym_in} ${out_f} ${out_f}
+       COMMAND ${CMAKE_OBJCOPY} --redefine-sym _binary_${sym_in}_o_tmp_end=b_${sym_in}_end ${out_f} ${out_f}
+diff --git a/repos/PureSpice/include/purespice.h b/repos/PureSpice/include/purespice.h
+index d72cddf..3acb02d 100644
+--- a/repos/PureSpice/include/purespice.h
++++ b/repos/PureSpice/include/purespice.h
+@@ -24,6 +24,7 @@
+ #include <sys/types.h>
+ #include <stdbool.h>
+ #include <stdint.h>
++#include <string.h>
+ 
+ typedef enum PSStatus
+ {
+diff --git a/repos/cimgui/imgui/imgui_widgets.cpp b/repos/cimgui/imgui/imgui_widgets.cpp
+index 1e4297f..aecdbe2 100644
+--- a/repos/cimgui/imgui/imgui_widgets.cpp
++++ b/repos/cimgui/imgui/imgui_widgets.cpp
+@@ -4969,7 +4969,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
+                 apply_new_text = "";
+                 apply_new_text_length = 0;
+                 value_changed = true;
+-                IMSTB_TEXTEDIT_CHARTYPE empty_string;
++                IMSTB_TEXTEDIT_CHARTYPE empty_string = 0;
+                 stb_textedit_replace(state, state->Stb, &empty_string, 0);
+             }
+             else if (strcmp(buf, state->TextToRevertTo.Data) != 0)
