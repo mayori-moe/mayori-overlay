@@ -22,7 +22,7 @@ BDEPEND=">=dev-lang/go-1.26.0"
 src_compile() {
 	# from ./scripts/make/go-build.sh
 	export CGO_ENABLED=0
-	local version_pkg='github.com/AdguardTeam/dnsproxy/golibs/version'
+	local version_pkg='github.com/AdguardTeam/dnsproxy/internal/version'
 	local -a ldflags=( -X "${version_pkg}.version=${PV}" )
 	ego build \
 		-ldflags="${ldflags[*]}" \
