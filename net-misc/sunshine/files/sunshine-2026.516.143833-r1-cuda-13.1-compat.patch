@@ -1,0 +1,31 @@
+diff --git a/src/nvenc/nvenc_base.cpp b/src/nvenc/nvenc_base.cpp
+index ab8aa7a..f812b65 100644
+--- a/src/nvenc/nvenc_base.cpp
++++ b/src/nvenc/nvenc_base.cpp
+@@ -20,7 +20,7 @@
+ // - NV_ENC_*_VER definitions where the value inside NVENCAPI_STRUCT_VERSION() was increased
+ // - Incompatible struct changes in nvEncodeAPI.h (fields removed, semantics changed, etc.)
+ // - Test both old and new drivers with all supported codecs
+-#if NVENCAPI_VERSION != MAKE_NVENC_VER(13U, 0U)
++#if NVENCAPI_VERSION != MAKE_NVENC_VER(13U, 1U)
+   #error Check and update NVENC code for backwards compatibility!
+ #endif
+ 
+diff --git a/third-party/build-deps/third-party/FFmpeg/FFmpeg/libavcodec/nvenc.c b/third-party/build-deps/third-party/FFmpeg/FFmpeg/libavcodec/nvenc.c
+index 3922305..c5d69b0 100644
+--- a/third-party/build-deps/third-party/FFmpeg/FFmpeg/libavcodec/nvenc.c
++++ b/third-party/build-deps/third-party/FFmpeg/FFmpeg/libavcodec/nvenc.c
+@@ -2525,8 +2525,12 @@ static void nvenc_fill_time_code(AVCodecContext *avctx, const AVFrame *frame, NV
+         for (int i = 0; i < cnt; i++) {
+             unsigned hh, mm, ss, ff, drop;
+             ff_timecode_set_smpte(&drop, &hh, &mm, &ss, &ff, avctx->framerate, tc[i + 1], 0, 0);
+-
++            #if NVENCAPI_CHECK_VERSION(13, 1)
++	    time_code->clockTimestamp[i].countingTypeLSB = 0;
++            time_code->clockTimestamp[i].countingTypeMSB = 0;
++	    #else
+             time_code->clockTimestamp[i].countingType = 0;
++	    #endif
+             time_code->clockTimestamp[i].discontinuityFlag = 0;
+             time_code->clockTimestamp[i].cntDroppedFrames = drop;
+             time_code->clockTimestamp[i].nFrames = ff;
