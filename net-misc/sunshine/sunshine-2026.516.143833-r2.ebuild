@@ -14,7 +14,7 @@ NANORS_COMMIT="19f07b513e924e471cadd141943c1ec4adc8d0e0"
 TRAY_COMMIT="563dee475f8878d252ab2b9938d3a014e776ed08"
 SWS_COMMIT="546895a93a29062bb178367b46c7afb72da9881e"
 WLRP_COMMIT="a741f0ac5d655338a5100fc34bc8cec87d237346"
-FFMPEG_VERSION="8.1.1"
+FFMPEG_VERSION="8.1.2"
 
 # To make the assets tarball:
 # PV=
@@ -60,7 +60,7 @@ DESCRIPTION="Self-hosted game stream host for Moonlight"
 HOMEPAGE="https://github.com/LizardByte/Sunshine"
 LICENSE="GPL-3"
 SLOT="0"
-IUSE="cuda debug libdrm pipewire svt-av1 systemd trayicon vaapi vulkan wayland X x264 x265"
+IUSE="cuda debug +libdrm pipewire svt-av1 systemd trayicon vaapi vulkan wayland X x264 x265"
 
 # Strings for CPU features in the useflag[:configure_option] form
 # if :configure_option isn't set, it will use 'useflag' as configure option
@@ -131,6 +131,7 @@ CPU_REQUIRED_USE="
 REQUIRED_USE="
 	${CPU_REQUIRED_USE}
 	|| ( cuda libdrm wayland X )
+	pipewire? ( wayland )
 "
 
 CDEPEND="
@@ -141,14 +142,12 @@ CDEPEND="
 	media-libs/opus
 	net-libs/miniupnpc:=
 	net-misc/curl
+	sys-libs/libcap
 	|| (
 		media-libs/libpulse
 		media-sound/apulse[sdk]
 	)
-	libdrm? (
-		sys-libs/libcap
-		x11-libs/libdrm
-	)
+	libdrm? ( x11-libs/libdrm )
 	pipewire? ( media-video/pipewire:= )
 	svt-av1? ( media-libs/svt-av1:= )
 	trayicon? (
@@ -178,14 +177,29 @@ RDEPEND="
 	)
 "
 
+# Ensure that the minimum Clang version permitted supports the maximum
+# nvidia-cuda-toolkit version permitted. See PARTIALLY_SUPPORTED in Clang's
+# Basic/Cuda.h. Also check the minimum CUDA version required by Sunshine in
+# linux.cmake. It's okay if Clang doesn't support the latest CUDA versions.
+
 DEPEND="
 	${CDEPEND}
 	dev-cpp/nlohmann_json
 	>=media-libs/amf-headers-1.4.36-r1
 	=media-libs/nv-codec-headers-13*
-	cuda? ( dev-util/nvidia-cuda-toolkit )
-	vulkan? ( >=dev-util/vulkan-headers-1.4.317 )
-	wayland? ( dev-libs/wayland-protocols )
+	cuda? (
+		>=dev-util/nvidia-cuda-toolkit-12
+		<dev-util/nvidia-cuda-toolkit-12.10
+	)
+	pipewire? ( x11-libs/libdrm )
+	vulkan? (
+		>=dev-util/vulkan-headers-1.4.317
+		x11-libs/libdrm
+	)
+	wayland? (
+		dev-libs/wayland-protocols
+		x11-libs/libdrm
+	)
 "
 
 BDEPEND="
@@ -193,7 +207,7 @@ BDEPEND="
 	net-libs/nodejs[npm]
 	virtual/pkgconfig
 	cpu_flags_x86_mmx? ( >=dev-lang/nasm-2.13 )
-	cuda? ( llvm-core/clang:*[llvm_targets_NVPTX] )
+	cuda? ( >=llvm-core/clang-22[llvm_targets_NVPTX] )
 	wayland? ( dev-util/wayland-scanner )
 	$(python_gen_any_dep '
 		dev-python/jinja2[${PYTHON_USEDEP}]
@@ -202,10 +216,14 @@ BDEPEND="
 
 PATCHES=(
 	"${FILESDIR}"/${PN}-2026.516.143833-git-if-needed.patch
+	"${FILESDIR}"/${PN}-2026.516.143833-no-drm.patch
+	"${FILESDIR}"/${PN}-2026.516.143833-no-wayland.patch
+	"${FILESDIR}"/${PN}-2026.516.143833-nvcodec.patch
 	"${FILESDIR}"/${PN}-new-boost.patch
 	"${FILESDIR}"/${PN}-new-cuda.patch
 	"${FILESDIR}"/${PN}-2025.924.154138.assert-fail-multiversioning-musl-fix.patch
 	"${FILESDIR}"/${PN}-2026.516.143833-std-span-include.patch
+
 )
 
 # Make this mess a bit simpler.
