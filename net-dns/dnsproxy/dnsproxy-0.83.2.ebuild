@@ -10,7 +10,7 @@ HOMEPAGE="https://github.com/AdguardTeam/dnsproxy"
 
 SRC_URI="
 	https://github.com/AdguardTeam/dnsproxy/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz
-	https://github.com/mayori-moe/mayori-overlay/releases/download/distfiles/dnsproxy-${PV}-vendor.tar.gz
+	https://github.com/mayori-moe/mayori-overlay/releases/download/distfiles/dnsproxy-${PV}-vendor.tar.xz
 "
 
 LICENSE="Apache-2.0"
