@@ -1,4 +1,4 @@
-# Copyright 2022-2025 Gentoo Authors
+# Copyright 2022-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
@@ -14,19 +14,17 @@ HOMEPAGE="https://github.com/vinceliuice/Fluent-icon-theme/"
 
 if [[ "${PV}" == *9999* ]]; then
 	inherit git-r3
-
 	EGIT_REPO_URI="https://github.com/vinceliuice/${MY_PN}"
 else
 	SRC_URI="https://github.com/vinceliuice/${MY_PN}/archive/${MY_PV}.tar.gz
 		-> ${P}.gh.tar.gz"
 	S="${WORKDIR}/${MY_PN}-${MY_PV}"
-
 	KEYWORDS="~amd64 ~x86"
 fi
 
 LICENSE="GPL-3+"
 SLOT="0"
-IUSE="+hardlink +red round"
+IUSE="+hardlink round +red "
 RESTRICT="binchecks strip test"
 
 BDEPEND="
@@ -35,7 +33,6 @@ BDEPEND="
 
 src_prepare() {
 	default
-
 	sed -i '/gtk-update-icon-cache/d' install.sh || die
 }
 
