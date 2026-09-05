@@ -1,0 +1,33 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d7258a1..60f20e4 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -67,7 +67,6 @@ message("[CMAKE_FIND_ROOT_PATH] ${CMAKE_FIND_ROOT_PATH}")
+ set(BUILD_SHARED_LIBS OFF)
+ 
+ include("cmake/print.cmake")
+-include("cmake/QHotkey.cmake")
+ 
+ find_package(Threads)
+ 
+@@ -78,6 +77,7 @@ endif ()
+ include("cmake/myproto.cmake")
+ list(APPEND NKR_EXTERNAL_TARGETS myproto)
+ 
++find_package(QHotkey CONFIG REQUIRED)
+ list(APPEND NKR_EXTERNAL_TARGETS qhotkey)
+ 
+ # Sources
+diff --git a/src/ui/mainWindow/mainwindow_hotkeys.cpp b/src/ui/mainWindow/mainwindow_hotkeys.cpp
+index 117ff65..1a15945 100644
+--- a/src/ui/mainWindow/mainwindow_hotkeys.cpp
++++ b/src/ui/mainWindow/mainwindow_hotkeys.cpp
+@@ -7,7 +7,7 @@
+ 
+ #include <memory>
+ 
+-#include <3rdparty/QHotkey/qhotkey.h>
++#include <QHotkey>
+ 
+ namespace {
+     QList<std::shared_ptr<QHotkey>> RegisteredHotkey;

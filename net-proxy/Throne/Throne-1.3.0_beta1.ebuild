@@ -5,12 +5,17 @@ EAPI=8
 
 inherit cmake desktop go-module xdg
 
+MY_PV="${PV/_beta/-beta.}"
+MY_P="${PN}-${MY_PV}"
+
 DESCRIPTION="Qt based cross-platform GUI proxy configuration manager"
 HOMEPAGE="https://github.com/throneproj/Throne"
 SRC_URI="
-	https://github.com/throneproj/Throne/archive/refs/tags/${PV}.tar.gz -> ${P}.tar.gz
-	https://gitlab.com/api/v4/projects/69517529/packages/generic/${PN}/${PV}/${P}-deps.tar.xz
+	https://github.com/throneproj/Throne/archive/refs/tags/${MY_PV}.tar.gz -> ${MY_P}.tar.gz
+	https://gitlab.com/api/v4/projects/69517529/packages/generic/${PN}/${MY_PV}/${MY_P}-deps.tar.xz
 "
+
+S="${WORKDIR}/${MY_P}"
 
 # The first line is for the C++ code, the second line is for the Go module
 LICENSE="
@@ -35,8 +40,8 @@ BDEPEND="
 "
 
 PATCHES=(
-	"${FILESDIR}/${PN}-1.2.4-use-system-QHotkey.patch"
-	"${FILESDIR}/${PN}-1.1.1-use-system-quirc.patch"
+	"${FILESDIR}/${PN}-1.3.0_beta1-use-system-QHotkey.patch"
+	"${FILESDIR}/${PN}-1.3.0_beta1-use-system-quirc.patch"
 )
 
 src_unpack() {
