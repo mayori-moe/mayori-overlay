@@ -35,7 +35,7 @@ DEPEND="${RDEPEND}"
 BDEPEND="
 	dev-go/protobuf-go
 	dev-go/protoc-gen-go-grpc
-	>=dev-lang/go-1.26
+	>=dev-lang/go-1.26.0
 	dev-qt/qttools:6[linguist]
 "
 
@@ -72,7 +72,7 @@ src_configure() {
 src_compile() {
 	cmake_src_compile
 
-	cd "${S}/core/server" || die
+	cd "${S}/core" || die
 
 	pushd gen || die
 	protoc -I . --go_out=. --go-grpc_out=. libcore.proto
@@ -89,7 +89,7 @@ src_compile() {
 src_install() {
 	exeinto /usr/lib/Throne
 	doexe "${BUILD_DIR}/Throne"
-	doexe core/server/ThroneCore
+	doexe core/ThroneCore
 
 	dosym -r /usr/lib/Throne/Throne /usr/bin/Throne
 
