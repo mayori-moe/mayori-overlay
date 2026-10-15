@@ -34,7 +34,7 @@ src_compile() {
 src_install() {
 	dobin "${PN}"
 	insinto /etc/dnsproxy
-	newins config.yaml.dist config.yaml
+	newins config.dist.yaml config.yaml
 	systemd_newunit "${FILESDIR}/dnsproxy.service-r1" dnsproxy.service
 	newinitd "${FILESDIR}/dnsproxy.initd-r1" ${PN}
 	insinto /etc/logrotate.d
