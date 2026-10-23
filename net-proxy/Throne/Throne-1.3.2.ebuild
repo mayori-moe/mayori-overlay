@@ -39,7 +39,10 @@ BDEPEND="
 	dev-qt/qttools:6[linguist]
 "
 
-PATCHES=()
+PATCHES=(
+	"${FILESDIR}/${PN}-1.3.0_beta1-use-system-QHotkey.patch"
+	"${FILESDIR}/${PN}-1.3.0_beta1-use-system-quirc.patch"
+)
 
 src_unpack() {
 	# The vendor tarball is unpacked to `${S}/core/server`, but `go-module_src_unpack`
@@ -50,6 +53,7 @@ src_unpack() {
 }
 
 src_prepare() {
+	rm -r 3rdparty/{QHotkey,quirc} || die
 
 	sed '/^cmake_minimum_required/ s/(.*)/(VERSION 3.10)/' \
 		-i 3rdparty/SQLiteCpp/CMakeLists.txt || die
@@ -88,7 +92,7 @@ src_install() {
 	doexe core/ThroneCore
 
 	dosym -r /usr/lib/Throne/Throne /usr/bin/Throne
-	#dosym -r /usr/lib/Throne/ThroneCore /usr/bin/ThroneCore
+	dosym -r /usr/lib/Throne/ThroneCore /usr/bin/ThroneCore
 
 	doicon -s 256 res/public/Throne.png
 	domenu "${FILESDIR}/Throne.desktop"
