@@ -88,7 +88,7 @@ src_install() {
 	doexe core/ThroneCore
 
 	dosym -r /usr/lib/Throne/Throne /usr/bin/Throne
-	#dosym -r /usr/lib/Throne/ThroneCore /usr/bin/ThroneCore
+	dosym -r /usr/lib/Throne/ThroneCore /usr/bin/ThroneCore
 
 	doicon -s 256 res/public/Throne.png
 	domenu "${FILESDIR}/Throne.desktop"
