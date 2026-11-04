@@ -3,12 +3,12 @@
 
 EAPI=8
 
-LLVM_COMPAT=( {18..21} )
+LLVM_COMPAT=( {18..22} )
 LLVM_OPTIONAL=1
 CARGO_OPTIONAL=1
-PYTHON_COMPAT=( python3_{11..14} )
+PYTHON_COMPAT=( python3_{12..14} )
 
-inherit flag-o-matic llvm-r1 meson-multilib python-any-r1 linux-info
+inherit flag-o-matic linux-info llvm-r2 meson-multilib python-any-r1 toolchain-funcs
 
 MY_P="${P/_/-}"
 
@@ -28,7 +28,7 @@ RUST_OPTIONAL=1
 inherit cargo
 
 DESCRIPTION="OpenGL-like graphic library for Linux"
-HOMEPAGE="https://www.mesa3d.org/ https://mesa.freedesktop.org/"
+HOMEPAGE="https://mesa3d.org/"
 
 if [[ ${PV} == 9999 ]]; then
 	EGIT_REPO_URI="https://gitlab.freedesktop.org/mesa/mesa.git"
@@ -37,14 +37,15 @@ else
 	SRC_URI="
 		https://archive.mesa3d.org/${MY_P}.tar.xz
 	"
-	KEYWORDS="~alpha ~amd64 ~arm ~arm64 ~hppa ~loong ~mips ~ppc ~ppc64 ~riscv ~s390 ~sparc ~x86 ~x64-solaris"
+	KEYWORDS="~alpha amd64 arm arm64 ~hppa ~loong ~mips ppc ppc64 ~riscv ~s390 ~sparc x86 ~x64-solaris"
 fi
 
 # This should be {CARGO_CRATE_URIS//.crate/.tar.gz} to correspond to the wrap files,
 # but there are "stale" distfiles on the mirrors with the wrong names.
 # export MESON_PACKAGE_CACHE_DIR="${DISTDIR}"
 SRC_URI+="
-	${CARGO_CRATE_URIS}
+	opencl? ( ${CARGO_CRATE_URIS} )
+	!opencl? ( video_cards_nvk? ( ${CARGO_CRATE_URIS} ) )
 "
 
 S="${WORKDIR}/${MY_P}"
@@ -90,7 +91,7 @@ RDEPEND="
 			opencl? (
 				dev-util/spirv-llvm-translator:\${LLVM_SLOT}
 				llvm-core/clang:\${LLVM_SLOT}[llvm_targets_AMDGPU(+),${MULTILIB_USEDEP}]
-				=llvm-core/libclc-\${LLVM_SLOT}*[spirv(-)]
+				=llvm-runtimes/libclc-\${LLVM_SLOT}*[spirv(-)]
 			)
 		")
 		video_cards_r600? (
@@ -103,7 +104,7 @@ RDEPEND="
 	lm-sensors? ( sys-apps/lm-sensors:=[${MULTILIB_USEDEP}] )
 	opencl? (
 		>=virtual/opencl-3
-		llvm-core/libclc[spirv(-)]
+		llvm-runtimes/libclc[spirv(-)]
 		virtual/libelf:0=
 	)
 	vaapi? (
@@ -136,7 +137,7 @@ RDEPEND="
 
 DEPEND="${RDEPEND}
 	sysprof? ( >=dev-util/sysprof-capture-49.0[${MULTILIB_USEDEP}] )
-	video_cards_d3d12? ( >=dev-util/directx-headers-1.618.1[${MULTILIB_USEDEP}] )
+	video_cards_d3d12? ( >=dev-util/directx-headers-1.619.1[${MULTILIB_USEDEP}] )
 	valgrind? ( dev-debug/valgrind )
 	wayland? ( >=dev-libs/wayland-protocols-1.41 )
 	X? (
@@ -147,7 +148,7 @@ DEPEND="${RDEPEND}
 
 CLC_DEPSTRING="
 	~dev-util/mesa_clc-${PV}[video_cards_asahi?,video_cards_panfrost?]
-	llvm-core/libclc[spirv(-)]
+	llvm-runtimes/libclc[spirv(-)]
 "
 BDEPEND="
 	${PYTHON_DEPS}
@@ -157,7 +158,7 @@ BDEPEND="
 	)
 	>=dev-build/meson-1.7.0
 	app-alternatives/yacc
-	app-alternatives/lex
+	sys-devel/flex
 	virtual/pkgconfig
 	$(python_gen_any_dep "
 		>=dev-python/mako-0.8.0[\${PYTHON_USEDEP}]
@@ -169,6 +170,7 @@ BDEPEND="
 	video_cards_panfrost? ( ${CLC_DEPSTRING} )
 	vulkan? (
 		dev-util/glslang
+		video_cards_imagination? ( ${CLC_DEPSTRING} )
 		video_cards_nvk? (
 			>=dev-util/bindgen-0.71.1
 			>=dev-util/cbindgen-0.26.0
@@ -185,6 +187,10 @@ x86? (
 	usr/lib/libGLX_mesa.so.0.0.0
 )"
 
+PATCHES=(
+	"${FILESDIR}"/${PV}-gallivm-Fix-armhf-build-against-LLVM-22.patch
+)
+
 src_unpack() {
 	if [[ ${PV} == 9999 ]]; then
 		git-r3_src_unpack
@@ -192,17 +198,23 @@ src_unpack() {
 		unpack ${MY_P}.tar.xz
 	fi
 
-	# We need this because we cannot tell meson to use DISTDIR yet
-	pushd "${DISTDIR}" >/dev/null || die
-	mkdir -p "${S}"/subprojects/packagecache || die
-	local i
-	for i in *.crate; do
-		ln -s "${PWD}/${i}" "${S}/subprojects/packagecache/${i/.crate/}.tar.gz" || die
-	done
-	popd >/dev/null || die
+	if use opencl || use video_cards_nvk; then
+		# We need this because we cannot tell meson to use DISTDIR yet
+		mkdir -p "${S}"/subprojects/packagecache || die
+		local i
+		for i in ${CRATES}; do
+			i=${i/@/-}
+			ln -s "${DISTDIR}/${i}.crate" \
+				"${S}/subprojects/packagecache/${i}.tar.gz" || die
+		done
+	fi
 }
 
 pkg_pretend() {
+	if [[ ${MERGE_TYPE} != binary ]] && use test; then
+		tc-check-openmp
+	fi
+
 	if use vulkan; then
 		if ! use video_cards_asahi &&
 		   ! use video_cards_d3d12 &&
@@ -243,6 +255,10 @@ python_check_deps() {
 }
 
 pkg_setup() {
+	if [[ ${MERGE_TYPE} != binary ]] && use test; then
+		tc-check-openmp
+	fi
+
 	# warning message for bug 459306
 	if use llvm && has_version llvm-core/llvm[!debug=]; then
 		ewarn "Mismatch between debug USE flags in media-libs/mesa and llvm-core/llvm"
@@ -263,7 +279,7 @@ pkg_setup() {
 		linux-info_pkg_setup
 	fi
 
-	use llvm && llvm-r1_pkg_setup
+	use llvm && llvm-r2_pkg_setup
 	python-any-r1_pkg_setup
 
 	if use opencl || (use vulkan && use video_cards_nvk); then
@@ -294,7 +310,6 @@ multilib_src_configure() {
 	   use video_cards_radeonsi ||
 	   use video_cards_virgl; then
 		emesonargs+=($(meson_feature vaapi gallium-va))
-		use vaapi && emesonargs+=( -Dva-libs-path="${EPREFIX}"/usr/$(get_libdir)/va/drivers )
 	else
 		emesonargs+=(-Dgallium-va=disabled)
 	fi
@@ -371,7 +386,8 @@ multilib_src_configure() {
 	if use video_cards_asahi ||
 	   use video_cards_intel ||
 	   use video_cards_nvk ||
-	   use video_cards_panfrost; then
+	   use video_cards_panfrost ||
+	   { use vulkan && use video_cards_imagination; }; then
 	   emesonargs+=(-Dmesa-clc=system)
 	fi
 
@@ -404,6 +420,7 @@ multilib_src_configure() {
 		-Dgallium-drivers=$(driver_list "${GALLIUM_DRIVERS[*]}")
 		-Dvulkan-drivers=$(driver_list "${VULKAN_DRIVERS[*]}")
 		-Db_ndebug=$(usex debug false true)
+		-Dallow-broken-lto=true
 	)
 	meson_src_configure
 }
