@@ -1,0 +1,22 @@
+diff --git a/Makefile b/Makefile
+index 3ad88b3..af6b81e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -78,6 +78,17 @@ LDSO_PATHNAME = $(syslibdir)/ld-musl-$(ARCH)$(SUBARCH).so.1
+ -include config.mak
+ -include $(srcdir)/arch/$(ARCH)/arch.mak
+ 
++# An external malloc implementation lives in src/malloc/$(MALLOC_DIR).
++# Its sources need the implementation's own include path; the mimalloc
++# tree is expected next to the musl source tree (../mimalloc).
++ifeq ($(MALLOC_DIR),external)
++LIBC_OBJS := $(filter-out obj/src/malloc/calloc.o obj/src/malloc/libc_calloc.o,$(LIBC_OBJS))
++MIMALLOC_DIR = $(srcdir)/../mimalloc
++# musl 1.2.6 does not ship <stdatomic.h>; use the compiler's freestanding one.
++MIMALLOC_CCINC := $(shell if d=`$(CC) -print-resource-dir 2>/dev/null` && test -n "$$d"; then echo "$$d/include"; else $(CC) -print-file-name=include; fi)
++obj/src/malloc/external/mimalloc.o obj/src/malloc/external/mimalloc.lo: CFLAGS_ALL += -std=gnu11 -D_GNU_SOURCE -O3 -DNDEBUG -fvisibility=hidden -I$(srcdir)/.. -I$(MIMALLOC_DIR)/include -isystem $(MIMALLOC_CCINC)
++endif
++
+ ifeq ($(ARCH),)
+ 
+ all:
