@@ -124,31 +124,8 @@ hidden void __malloc_atfork(int who)
 
 hidden void __malloc_donate(char *a, char *b)
 {
-	/* musl's reclaim_gaps() only donates the unused sub-page gaps at the
-	 * start/end of writable PT_LOAD segments (at most PAGE_SIZE-1 bytes per
-	 * call).  mimalloc v3 can only take external OS memory through
-	 * mi_manage_os_memory(), which requires at least MI_ARENA_MIN_SIZE
-	 * (32 MiB on 64-bit, 8 MiB on 32-bit).  Accept such large donations if
-	 * they ever appear, but silently ignore musl's normal small gaps. */
-	uintptr_t start = (uintptr_t)a;
-	uintptr_t end = (uintptr_t)b;
-	const size_t align = mi_arena_min_alignment();
-	const size_t min_size = mi_arena_min_size();
-
-	start = (start + align - 1) & ~(uintptr_t)(align - 1);
-	end &= ~(uintptr_t)(align - 1);
-	if (end <= start || (size_t)(end - start) < min_size)
-		return;
-
-	/* reclaim_gaps() runs before the first allocation during dynamic
-	 * linking; make sure the allocator is initialized before registering
-	 * the range (mi_process_init() is idempotent). */
-	mi_process_init();
-	(void)mi_manage_os_memory((void *)start, (size_t)(end - start),
-	                          true /* committed */,
-	                          true /* pinned: never decommit */,
-	                          false /* not known to be zero */,
-	                          -1 /* numa node */);
+	(void)a;
+	(void)b;
 }
 
 /* ------------------------------------------------------------------------- */
