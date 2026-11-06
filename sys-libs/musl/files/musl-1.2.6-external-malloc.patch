@@ -56,7 +56,7 @@
 +
 +obj/mimalloc.o: $(MIMALLOC_GLUE) $(GENH) $(IMPH)
 +	$(CC) $(MIMALLOC_CFLAGS) $(CPPFLAGS) $(CFLAGS_AUTO) $(CFLAGS) \
-+		-std=gnu11 -O3 -DNDEBUG -fPIC -fvisibility=hidden -fno-stack-protector \
++		-std=gnu11 -DNDEBUG -DMI_SECURE=1 -fPIC -fvisibility=hidden -fstack-protector-strong \
 +		-isystem `$(CC) -print-file-name=include` \
 +		-c -o $@ $<
 +
