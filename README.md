@@ -8,7 +8,7 @@ I'm running Gentoo with `musl` libc. If you are not using musl, be careful about
 
 ## Package Notes:
 
-[musl](https://musl.libc.org) with mimalloc patch for better performance. Inspired by Chimera Linux's patch.
+[musl](https://musl.libc.org) with [mimalloc](https://github.com/microsoft/mimalloc) patch for better performance. Inspired by Chimera Linux's patch.
 If you want to patch with [rpmalloc](https://github.com/mjansson/rpmalloc), see [this repo](https://github.com/mayori-moe/gentoo_patches)
 
 [Cherry-KDE](https://github.com/nullxception/cherry-kde) theme
