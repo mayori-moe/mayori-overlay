@@ -25,12 +25,18 @@ else
 	BDEPEND="verify-sig? ( sec-keys/openpgp-keys-musl )"
 fi
 
+# mimalloc: the allocator substituted for mallocng.  We pin a release (the
+# sources are not patched; only musl's build system is extended).
+MIMALLOC_PV="3.6.1"
+MIMALLOC_P="mimalloc-${MIMALLOC_PV}"
+
 GETENT_COMMIT="93a08815f8598db442d8b766b463d0150ed8e2ab"
 GETENT_FILE="musl-getent-${GETENT_COMMIT}.c"
 SRC_URI+="
 	https://dev.gentoo.org/~blueness/musl-misc/getconf.c
 	https://gitlab.alpinelinux.org/alpine/aports/-/raw/${GETENT_COMMIT}/main/musl/getent.c -> ${GETENT_FILE}
 	https://dev.gentoo.org/~blueness/musl-misc/iconv.c
+	https://github.com/microsoft/mimalloc/archive/refs/tags/v${MIMALLOC_PV}.tar.gz -> ${MIMALLOC_P}.tar.gz
 "
 
 LICENSE="MIT LGPL-2 GPL-2"
@@ -59,6 +65,8 @@ PATCHES=(
 	"${FILESDIR}"/${P}-riscv32-syscalls.patch
 	"${FILESDIR}"/${P}-riscv32-syscalls-2.patch
 	"${FILESDIR}"/${PN}-1.2.6-CVE-2026-107891.patch
+	"${FILESDIR}"/${P}-external-malloc.patch
+	"${FILESDIR}"/${P}-mimalloc-tsd.patch
 )
 
 just_headers() {
@@ -96,6 +104,19 @@ src_unpack() {
 src_prepare() {
 	default
 
+	# --with-malloc=external requires the directory to exist (configure only
+	# checks that the requested malloc implementation directory exists).  The
+	# actual allocator object is built from mimalloc by the Makefile.
+	mkdir -p "${S}"/src/malloc/external || die
+
+	# Neither musl nor mimalloc sources are modified by hand: the glue file
+	# provides the musl entry points, mimalloc is compiled from its own source
+	# tree, and the small patches below only adapt the integration.
+	( cd "${WORKDIR}"/${MIMALLOC_P} && eapply -p1 "${FILESDIR}"/mimalloc-3.6.1-inline-tsd.patch ) || die
+	cp "${FILESDIR}"/mimalloc-glue.c "${S}"/mimalloc-glue.c || die
+	rm -rf "${S}"/mimalloc || die
+	cp -a "${WORKDIR}"/${MIMALLOC_P} "${S}"/mimalloc || die
+
 	mkdir "${WORKDIR}"/misc || die
 	cp "${DISTDIR}"/getconf.c "${WORKDIR}"/misc/getconf.c || die
 	cp "${DISTDIR}/${GETENT_FILE}" "${WORKDIR}"/misc/getent.c || die
@@ -108,12 +129,18 @@ src_configure() {
 
 	just_headers && export CC=true
 
+	# The only musl source change is conditional on this macro; it keeps the
+	# main thread's TSD pointer valid when the dynamic linker replaces the
+	# initial TLS block (see musl-1.2.6-mimalloc-tsd.patch).
+	export CPPFLAGS="${CPPFLAGS} -DMUSL_EXTERNAL_MALLOC"
+
 	local sysroot
 	target_is_not_host && sysroot=/usr/${CTARGET}
 	./configure \
 		--target=${CTARGET} \
 		--prefix="${EPREFIX}${sysroot}/usr" \
 		--syslibdir="${EPREFIX}${sysroot}/lib" \
+		--with-malloc=external \
 		--disable-gcc-wrapper || die
 }
 

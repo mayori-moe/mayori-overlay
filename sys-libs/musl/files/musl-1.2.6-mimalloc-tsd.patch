@@ -1,0 +1,16 @@
+--- a/src/env/__init_tls.c
++++ b/src/env/__init_tls.c
+@@ -24,6 +24,13 @@
+ 	td->robust_list.head = &td->robust_list.head;
+ 	td->sysinfo = __sysinfo;
+ 	td->next = td->prev = td;
++#ifdef MUSL_EXTERNAL_MALLOC
++	/* A libc-internal allocator may create pthread keys before the dynamic
++	 * linker replaces the initial TLS block (ldso/dynlink.c: __dls3).  The
++	 * key data itself lives in the global __pthread_tsd_main array, so keep
++	 * the main thread's tsd pointer valid across that switch. */
++	td->tsd = __pthread_tsd_main;
++#endif
+ 	return 0;
+ }
+ 

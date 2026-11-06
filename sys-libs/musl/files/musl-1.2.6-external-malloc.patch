@@ -1,0 +1,75 @@
+--- a/Makefile
++++ b/Makefile
+@@ -18,6 +18,14 @@
+ syslibdir = /lib
+ 
+ MALLOC_DIR = mallocng
++
++# Support for an externally built allocator (--with-malloc=external).
++# MALLOC_DIR is set from config.mak, so use recursively expanded variables.
++MIMALLOC_DIR ?= $(srcdir)/mimalloc
++MIMALLOC_GLUE ?= $(srcdir)/mimalloc-glue.c
++EXTRA_OBJ = $(if $(filter external,$(MALLOC_DIR)),obj/mimalloc.o)
++EXTERNAL_MALLOC_OBJS = $(if $(filter external,$(MALLOC_DIR)),src/malloc/lite_malloc.o src/malloc/calloc.o src/malloc/libc_calloc.o)
++
+ SRC_DIRS = $(addprefix $(srcdir)/,src/* src/malloc/$(MALLOC_DIR) crt ldso $(COMPAT_SRC_DIRS))
+ BASE_GLOBS = $(addsuffix /*.c,$(SRC_DIRS))
+ ARCH_GLOBS = $(addsuffix /$(ARCH)/*.[csS],$(SRC_DIRS))
+@@ -26,7 +34,7 @@
+ BASE_OBJS = $(patsubst $(srcdir)/%,%.o,$(basename $(BASE_SRCS)))
+ ARCH_OBJS = $(patsubst $(srcdir)/%,%.o,$(basename $(ARCH_SRCS)))
+ REPLACED_OBJS = $(sort $(subst /$(ARCH)/,/,$(ARCH_OBJS)))
+-ALL_OBJS = $(addprefix obj/, $(filter-out $(REPLACED_OBJS), $(sort $(BASE_OBJS) $(ARCH_OBJS))))
++ALL_OBJS = $(addprefix obj/, $(filter-out $(REPLACED_OBJS) $(EXTERNAL_MALLOC_OBJS), $(sort $(BASE_OBJS) $(ARCH_OBJS))))
+ 
+ LIBC_OBJS = $(filter obj/src/%,$(ALL_OBJS)) $(filter obj/compat/%,$(ALL_OBJS))
+ LDSO_OBJS = $(filter obj/ldso/%,$(ALL_OBJS:%.o=%.lo))
+@@ -88,9 +96,9 @@
+ 
+ all: $(ALL_LIBS) $(ALL_TOOLS)
+ 
+-OBJ_DIRS = $(sort $(patsubst %/,%,$(dir $(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(GENH) $(GENH_INT))) obj/include)
++OBJ_DIRS = $(sort $(patsubst %/,%,$(dir $(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(EXTRA_OBJ) $(GENH) $(GENH_INT))) obj/include)
+ 
+-$(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(ALL_OBJS:%.o=%.lo) $(GENH) $(GENH_INT): | $(OBJ_DIRS)
++$(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(ALL_OBJS:%.o=%.lo) $(EXTRA_OBJ) $(GENH) $(GENH_INT): | $(OBJ_DIRS)
+ 
+ $(OBJ_DIRS):
+ 	mkdir -p $@
+@@ -158,13 +166,32 @@
+ obj/%.lo: $(srcdir)/%.c $(GENH) $(IMPH)
+ 	$(CC_CMD)
+ 
+-lib/libc.so: $(LOBJS) $(LDSO_OBJS)
++# External allocator (mimalloc) as one position independent object.  It is
++# hosted code, so unlike musl itself it needs GNU extensions and the compiler
++# provided headers (notably <stdatomic.h>).
++#
++# MI_TLS_MODEL_PTHREADS is required: musl does not register the dynamic
++# linker's own PT_TLS segment (ldso/libc is special-cased in load_library),
++# so __thread variables in libc.so have no valid TLS module id.  mimalloc's
++# pthread based TLS model avoids libc TLS entirely.
++MIMALLOC_CFLAGS = -nostdinc -D_GNU_SOURCE -DMI_TLS_MODEL_PTHREADS=1 \
++	-I$(srcdir)/arch/$(ARCH) -I$(srcdir)/arch/generic \
++	-Iobj/src/internal -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include \
++	-I$(MIMALLOC_DIR)/include -I$(MIMALLOC_DIR)/src
++
++obj/mimalloc.o: $(MIMALLOC_GLUE) $(GENH) $(IMPH)
++	$(CC) $(MIMALLOC_CFLAGS) $(CPPFLAGS) $(CFLAGS_AUTO) $(CFLAGS) \
++		-std=gnu11 -O3 -DNDEBUG -fPIC -fvisibility=hidden -fno-stack-protector \
++		-isystem `$(CC) -print-file-name=include` \
++		-c -o $@ $<
++
++lib/libc.so: $(LOBJS) $(LDSO_OBJS) $(EXTRA_OBJ)
+ 	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -shared \
+-	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(LIBCC)
++	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(EXTRA_OBJ) $(LIBCC)
+ 
+-lib/libc.a: $(AOBJS)
++lib/libc.a: $(AOBJS) $(EXTRA_OBJ)
+ 	rm -f $@
+-	$(AR) rc $@ $(AOBJS)
++	$(AR) rc $@ $(AOBJS) $(EXTRA_OBJ)
+ 	$(RANLIB) $@
+ 
+ $(EMPTY_LIBS):

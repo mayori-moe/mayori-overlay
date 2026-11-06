@@ -1,0 +1,20 @@
+--- a/include/mimalloc/atomic.h
++++ b/include/mimalloc/atomic.h
+@@ -601,11 +601,16 @@
+ 
+ mi_decl_noinline bool _mi_pthread_key_create(pthread_key_t* pkey, void (*destruct)(void*), void* init);
+ 
++/* The libc integration may provide an inlined accessor. */
++#ifndef MI_PTHREAD_GETSPECIFIC
++#define MI_PTHREAD_GETSPECIFIC(key)  pthread_getspecific(key)
++#endif
++
+ static inline void* mi_pthread_key_get(pthread_key_t key) {
+   #if !MI_PTHREADS_GET_INVALID_KEY_IS_NULL
+   if mi_unlikely(key==MI_PTHREAD_KEY_INVALID) return NULL;
+   #endif
+-  return pthread_getspecific(key);
++  return MI_PTHREAD_GETSPECIFIC(key);
+ }
+ 
+ static inline bool mi_pthread_key_set(pthread_key_t* pkey, void* val) {
