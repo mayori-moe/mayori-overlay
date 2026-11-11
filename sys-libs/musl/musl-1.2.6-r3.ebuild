@@ -67,6 +67,7 @@ PATCHES=(
 	"${FILESDIR}"/${PN}-1.2.6-CVE-2026-107891.patch
 	"${FILESDIR}"/${P}-external-malloc.patch
 	"${FILESDIR}"/${P}-mimalloc-tsd.patch
+	"${FILESDIR}"/${P}-static-tls-surplus.patch
 )
 
 just_headers() {
