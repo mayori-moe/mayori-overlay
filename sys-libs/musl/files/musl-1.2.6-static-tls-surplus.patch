@@ -1,0 +1,216 @@
+--- a/ldso/dynlink.c
++++ b/ldso/dynlink.c
+@@ -90,6 +90,7 @@
+ 	char mark;
+ 	char bfs_built;
+ 	char runtime_loaded;
++	char static_tls;
+ 	struct dso **deps, *needed_by;
+ 	size_t ndeps_direct;
+ 	size_t next_dep;
+@@ -147,7 +148,20 @@
+ static struct debug debug;
+ static struct tls_module *tls_tail;
+ static size_t tls_cnt, tls_offset, tls_align = MIN_TLS_ALIGN;
+-static size_t static_tls_cnt;
++static size_t static_tls_align, static_tls_limit, static_tls_used;
++
++/* Extra static TLS space reserved at startup so that libraries loaded
++ * at runtime can be given a static TLS slot.  This is what allows
++ * initial-exec TLS relocations against such libraries to be resolved;
++ * without it the dynamic linker has to reject them. */
++#ifndef STATIC_TLS_SURPLUS
++#define STATIC_TLS_SURPLUS 4096
++#endif
++
++/* Alignment guaranteed for the reserved static TLS area.  Raising the
++ * thread pointer alignment at startup lets later-loaded modules with
++ * larger TLS alignment still be placed in the surplus. */
++#define STATIC_TLS_MAX_ALIGN 64
+ static pthread_mutex_t init_fini_lock;
+ static pthread_cond_t ctor_cond;
+ static struct dso *builtin_deps[2];
+@@ -376,6 +390,59 @@
+ 	return (struct symdef){ 0 };
+ }
+ 
++/* Give a runtime-loaded DSO a static TLS slot carved out of the
++ * surplus reserved at startup.  Threads which already exist own the
++ * storage, so only the TLS image has to be copied in and their DTV
++ * entries updated.  Returns 1 on success; 0 means the DSO keeps its
++ * dynamic TLS and initial-exec references to it must fail. */
++static int promote_static_tls(struct dso *dso)
++{
++	size_t off, base;
++
++	if (dso->static_tls) return 1;
++	if (!dso->tls.size || dso->tls.align > static_tls_align) return 0;
++	/* Offsets of surviving static slots are never rolled back, so
++	 * never hand out an overlapping one after a failed dlopen. */
++	base = tls_offset > static_tls_used ? tls_offset : static_tls_used;
++#ifdef TLS_ABOVE_TP
++	off = base + ((dso->tls.align-1) &
++		(-base + (uintptr_t)dso->tls.image));
++	if (off + dso->tls.size > static_tls_limit) return 0;
++	tls_offset = off + dso->tls.size;
++#else
++	off = base + dso->tls.size + dso->tls.align - 1;
++	off -= (off + (uintptr_t)dso->tls.image) & (dso->tls.align-1);
++	if (off > static_tls_limit) return 0;
++	tls_offset = off;
++#endif
++	static_tls_used = tls_offset;
++	dso->tls.offset = off;
++	dso->static_tls = 1;
++
++	if (dso->relocated) {
++		sigset_t set;
++		pthread_t self = __pthread_self(), td = self;
++		__block_app_sigs(&set);
++		__tl_lock();
++		do {
++			unsigned char *new = (void *)
++#ifdef TLS_ABOVE_TP
++				((char *)TP_ADJ(td) + off);
++#else
++				((char *)TP_ADJ(td) - off);
++#endif
++			memcpy(new, dso->tls.image, dso->tls.len);
++			if (td->dtv[0] >= dso->tls_id)
++				td->dtv[dso->tls_id] =
++					(uintptr_t)new + DTP_OFFSET;
++			td = td->next;
++		} while (td != self);
++		__tl_unlock();
++		__restore_sigs(&set);
++	}
++	return 1;
++}
++
+ static void do_relocs(struct dso *dso, size_t *rel, size_t rel_size, size_t stride)
+ {
+ 	unsigned char *base = dso->base;
+@@ -454,7 +521,8 @@
+ 		tls_val = def.sym ? def.sym->st_value : 0;
+ 
+ 		if ((type == REL_TPOFF || type == REL_TPOFF_NEG)
+-		    && def.dso->tls_id > static_tls_cnt) {
++		    && !def.dso->static_tls
++		    && !promote_static_tls(def.dso)) {
+ 			error("Error relocating %s: %s: initial-exec TLS "
+ 				"resolves to dynamic definition in %s",
+ 				dso->name, name, def.dso->name);
+@@ -515,7 +583,7 @@
+ #endif
+ 		case REL_TLSDESC:
+ 			if (stride<3) addend = reloc_addr[!TLSDESC_BACKWARDS];
+-			if (def.dso->tls_id > static_tls_cnt) {
++			if (!def.dso->static_tls && !promote_static_tls(def.dso)) {
+ 				struct td_index *new = malloc(sizeof *new);
+ 				if (!new) {
+ 					error(
+@@ -1237,6 +1305,10 @@
+ 			& (p->tls.align-1);
+ 		p->tls.offset = tls_offset;
+ #endif
++		/* DSOs linked in before the switch to runtime mode always
++		 * get a static slot.  DSOs loaded later are promoted on
++		 * demand, when an initial-exec relocation needs them. */
++		if (!runtime) p->static_tls = 1;
+ 		p->new_dtv = (void *)(-sizeof(size_t) &
+ 			(uintptr_t)(p->name+strlen(p->name)+sizeof(size_t)));
+ 		p->new_tls = (void *)(p->new_dtv + n_th*(tls_cnt+1));
+@@ -1634,11 +1706,16 @@
+ 
+ static void update_tls_size()
+ {
++	/* The surplus is reserved for the whole process lifetime, even
++	 * when only part of it has been promoted so far; otherwise
++	 * threads created between two promotions would end up with a
++	 * block too small for a later static slot. */
++	size_t off = tls_offset > static_tls_limit ? tls_offset : static_tls_limit;
+ 	libc.tls_cnt = tls_cnt;
+ 	libc.tls_align = tls_align;
+ 	libc.tls_size = ALIGN(
+ 		(1+tls_cnt) * sizeof(void *) +
+-		tls_offset +
++		off +
+ 		sizeof(struct pthread) +
+ 		tls_align * 2,
+ 	tls_align);
+@@ -1665,15 +1742,32 @@
+ 	/* Install new dtls into the enlarged, uninstalled dtv copies. */
+ 	for (p=head; ; p=p->next) {
+ 		if (p->tls_id <= old_cnt) continue;
+-		unsigned char *mem = p->new_tls;
+-		for (j=0; j<i; j++) {
+-			unsigned char *new = mem;
+-			new += ((uintptr_t)p->tls.image - (uintptr_t)mem)
+-				& (p->tls.align-1);
+-			memcpy(new, p->tls.image, p->tls.len);
+-			newdtv[j][p->tls_id] =
+-				(uintptr_t)new + DTP_OFFSET;
+-			mem += p->tls.size + p->tls.align;
++		if (p->static_tls) {
++			/* Static slot: every thread already owns the
++			 * storage, so copy the image in place. */
++			pthread_t tds = self;
++			for (j=0; j<i; j++, tds=tds->next) {
++				unsigned char *new = (void *)
++#ifdef TLS_ABOVE_TP
++					((char *)TP_ADJ(tds) + p->tls.offset);
++#else
++					((char *)TP_ADJ(tds) - p->tls.offset);
++#endif
++				memcpy(new, p->tls.image, p->tls.len);
++				newdtv[j][p->tls_id] =
++					(uintptr_t)new + DTP_OFFSET;
++			}
++		} else {
++			unsigned char *mem = p->new_tls;
++			for (j=0; j<i; j++) {
++				unsigned char *new = mem;
++				new += ((uintptr_t)p->tls.image - (uintptr_t)mem)
++					& (p->tls.align-1);
++				memcpy(new, p->tls.image, p->tls.len);
++				newdtv[j][p->tls_id] =
++					(uintptr_t)new + DTP_OFFSET;
++				mem += p->tls.size + p->tls.align;
++			}
+ 		}
+ 		if (p->tls_id == tls_cnt) break;
+ 	}
+@@ -1923,6 +2017,7 @@
+ 	if (app.tls.size) {
+ 		libc.tls_head = tls_tail = &app.tls;
+ 		app.tls_id = tls_cnt = 1;
++		app.static_tls = 1;
+ #ifdef TLS_ABOVE_TP
+ 		app.tls.offset = GAP_ABOVE_TP;
+ 		app.tls.offset += (-GAP_ABOVE_TP + (uintptr_t)app.tls.image)
+@@ -2009,6 +2104,9 @@
+ 
+ 	/* Initial TLS must also be allocated before final relocations
+ 	 * might result in calloc being a call to application code. */
++	tls_align = MAXP2(tls_align, STATIC_TLS_MAX_ALIGN);
++	static_tls_align = tls_align;
++	static_tls_limit = tls_offset + STATIC_TLS_SURPLUS;
+ 	update_tls_size();
+ 	void *initial_tls = builtin_tls;
+ 	if (libc.tls_size > sizeof builtin_tls || tls_align > MIN_TLS_ALIGN) {
+@@ -2019,7 +2117,6 @@
+ 			_exit(127);
+ 		}
+ 	}
+-	static_tls_cnt = tls_cnt;
+ 
+ 	/* The main program must be relocated LAST since it may contain
+ 	 * copy relocations which depend on libraries' relocations. */
+@@ -2154,6 +2251,7 @@
+ 		if (tls_tail) tls_tail->next = 0;
+ 		tls_cnt = orig_tls_cnt;
+ 		tls_offset = orig_tls_offset;
++		if (tls_offset < static_tls_used) tls_offset = static_tls_used;
+ 		tls_align = orig_tls_align;
+ 		lazy_head = orig_lazy_head;
+ 		tail = orig_tail;
