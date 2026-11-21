@@ -1,13 +1,16 @@
-# Copyright 2023-2025 Gentoo Authors
+# Copyright 2023-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
 
+# bundled openssl{,-sys} don't support openssl-4
 CRATES="
+	openssl-sys@0.9.117
+	openssl@0.10.81
 "
 
-LLVM_COMPAT=( {18..22} )
-RUST_MIN_VER="1.79.0"
+LLVM_COMPAT=( {18..23} )
+RUST_MIN_VER="1.80.0"
 
 inherit cargo llvm-r1 shell-completion xdg-utils
 
@@ -28,7 +31,7 @@ LICENSE+="
 	|| ( GPL-2 GPL-3 LGPL-3 )
 "
 SLOT="0"
-KEYWORDS="amd64 arm64"
+KEYWORDS="amd64 arm64 ~ppc64"
 IUSE="botan test"
 RESTRICT="!test? ( test )"
 
@@ -60,9 +63,19 @@ BDEPEND="
 
 QA_FLAGS_IGNORED="usr/bin/gpg-sq usr/bin/gpgv-sq"
 
+PATCHES=(
+	"${FILESDIR}"/${P}-tests.patch
+	"${FILESDIR}"/${P}-no-cargo-profile.patch
+)
+
 pkg_setup() {
 	llvm-r1_pkg_setup
 	rust_pkg_setup
+}
+
+src_prepare() {
+	default
+	cargo_update_crates
 }
 
 src_configure() {
