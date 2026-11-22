@@ -4,14 +4,19 @@
 EAPI=8
 
 DESCRIPTION="Clean, Flat, Δ Theme for KDE Plasma Desktop"
-HOMEPAGE="https://github.com/nullxception/cherry-kde"
+HOMEPAGE="https://github.com/mayori-moe/cherry-kde"
 
-EGIT_REPO_URI="https://github.com/mayori-moe/cherry-kde.git"
-inherit git-r3
+if [[ "${PV}" == *9999* ]]; then
+	inherit git-r3
+	EGIT_REPO_URI="https://github.com/mayori-moe/${PN}.git"
+else
+	SRC_URI="https://github.com/mayori-moe/${PN}/archive/${PV}.tar.gz
+		-> ${P}.tar.gz"
+	KEYWORDS="~alpha ~amd64 ~arm ~arm64 ~hppa ~m68k ~mips ~ppc ~ppc64 ~s390 ~sparc ~x86"
+fi
 
 LICENSE="GPL-3"
 SLOT="0"
-KEYWORDS="~amd64 ~x86"
 IUSE="+aurorae konsole +kvantum wallpaper"
 
 DEPEND=""
