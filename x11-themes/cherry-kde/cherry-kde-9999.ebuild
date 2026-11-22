@@ -6,7 +6,7 @@ EAPI=8
 DESCRIPTION="Clean, Flat, Δ Theme for KDE Plasma Desktop"
 HOMEPAGE="https://github.com/nullxception/cherry-kde"
 
-EGIT_REPO_URI="https://github.com/nullxception/cherry-kde.git"
+EGIT_REPO_URI="https://github.com/mayori-moe/cherry-kde.git"
 inherit git-r3
 
 LICENSE="GPL-3"
