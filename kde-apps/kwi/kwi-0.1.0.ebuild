@@ -11,7 +11,7 @@ KFMIN=6.29.0
 QTMIN=6.11.2
 PYTHON_COMPAT=( python3_{12..15})
 
-inherit ecm gear.kde.org optfeature xdg
+inherit ecm gear.kde.org xdg
 
 DESCRIPTION="Modern and fast terminal emulator for KDE Plasma and other desktops"
 HOMEPAGE="https://apps.kde.org/kwi"
