@@ -5,8 +5,10 @@ EAPI=8
 
 inherit crossdev flag-o-matic toolchain-funcs prefix
 
-DESCRIPTION="Light, fast and, simple C library focused on standards-conformance and safety"
-HOMEPAGE="https://musl.libc.org"
+DESCRIPTION="Light, fast and, simple C library focused on standards-conformance and safety (with mimalloc)"
+HOMEPAGE="https://musl.libc.org https://github.com/microsoft/mimalloc"
+
+MIMALLOC_PV="3.7.1"
 
 if [[ ${PV} == 9999 ]] ; then
 	EGIT_REPO_URI="https://git.musl-libc.org/git/musl"
@@ -25,23 +27,18 @@ else
 	BDEPEND="verify-sig? ( sec-keys/openpgp-keys-musl )"
 fi
 
-# mimalloc: the allocator substituted for mallocng.  We pin a release (the
-# sources are not patched; only musl's build system is extended).
-MIMALLOC_PV="3.6.1"
-MIMALLOC_P="mimalloc-${MIMALLOC_PV}"
-
 GETENT_COMMIT="93a08815f8598db442d8b766b463d0150ed8e2ab"
 GETENT_FILE="musl-getent-${GETENT_COMMIT}.c"
 SRC_URI+="
 	https://dev.gentoo.org/~blueness/musl-misc/getconf.c
 	https://gitlab.alpinelinux.org/alpine/aports/-/raw/${GETENT_COMMIT}/main/musl/getent.c -> ${GETENT_FILE}
 	https://dev.gentoo.org/~blueness/musl-misc/iconv.c
-	https://github.com/microsoft/mimalloc/archive/refs/tags/v${MIMALLOC_PV}.tar.gz -> ${MIMALLOC_P}.tar.gz
+	mimalloc? ( https://github.com/microsoft/mimalloc/archive/refs/tags/v${MIMALLOC_PV}.tar.gz -> mimalloc-${MIMALLOC_PV}.tar.gz )
 "
 
 LICENSE="MIT LGPL-2 GPL-2"
 SLOT="0"
-IUSE="crypt headers-only split-usr"
+IUSE="crypt headers-only +mimalloc split-usr"
 
 QA_SONAME="usr/lib/libc.so"
 QA_DT_NEEDED="usr/lib/libc.so"
@@ -66,8 +63,7 @@ PATCHES=(
 	"${FILESDIR}"/${P}-riscv32-syscalls-2.patch
 	"${FILESDIR}"/${PN}-1.2.6-CVE-2026-107891.patch
 	"${FILESDIR}"/${P}-external-malloc.patch
-	"${FILESDIR}"/${P}-mimalloc-tsd.patch
-	"${FILESDIR}"/${P}-static-tls-surplus.patch
+	"${FILESDIR}"/${P}-init-tp-tsd.patch
 )
 
 just_headers() {
@@ -105,23 +101,17 @@ src_unpack() {
 src_prepare() {
 	default
 
-	# --with-malloc=external requires the directory to exist (configure only
-	# checks that the requested malloc implementation directory exists).  The
-	# actual allocator object is built from mimalloc by the Makefile.
-	mkdir -p "${S}"/src/malloc/external || die
-
-	# Neither musl nor mimalloc sources are modified by hand: the glue file
-	# provides the musl entry points, mimalloc is compiled from its own source
-	# tree, and the small patches below only adapt the integration.
-	( cd "${WORKDIR}"/${MIMALLOC_P} && eapply -p1 "${FILESDIR}"/mimalloc-3.6.1-inline-tsd.patch ) || die
-	cp "${FILESDIR}"/mimalloc-glue.c "${S}"/mimalloc-glue.c || die
-	rm -rf "${S}"/mimalloc || die
-	cp -a "${WORKDIR}"/${MIMALLOC_P} "${S}"/mimalloc || die
-
 	mkdir "${WORKDIR}"/misc || die
 	cp "${DISTDIR}"/getconf.c "${WORKDIR}"/misc/getconf.c || die
 	cp "${DISTDIR}/${GETENT_FILE}" "${WORKDIR}"/misc/getent.c || die
 	cp "${DISTDIR}"/iconv.c "${WORKDIR}"/misc/iconv.c || die
+
+	if use mimalloc ; then
+		mkdir -p src/malloc/external || die
+		cp "${FILESDIR}"/mimalloc-glue.c src/malloc/external/mimalloc-glue.c || die
+		cp "${FILESDIR}"/mimalloc-verify-syms.sh src/malloc/external/verify-syms.sh || die
+		chmod +x src/malloc/external/verify-syms.sh || die
+	fi
 }
 
 src_configure() {
@@ -130,26 +120,37 @@ src_configure() {
 
 	just_headers && export CC=true
 
-	# The only musl source change is conditional on this macro; it keeps the
-	# main thread's TSD pointer valid when the dynamic linker replaces the
-	# initial TLS block (see musl-1.2.6-mimalloc-tsd.patch).
-	export CPPFLAGS="${CPPFLAGS} -DMUSL_EXTERNAL_MALLOC"
-
 	local sysroot
 	target_is_not_host && sysroot=/usr/${CTARGET}
-	./configure \
-		--target=${CTARGET} \
-		--prefix="${EPREFIX}${sysroot}/usr" \
-		--syslibdir="${EPREFIX}${sysroot}/lib" \
-		--with-malloc=external \
-		--disable-gcc-wrapper || die
+
+	local myconf=(
+		--target=${CTARGET}
+		--prefix="${EPREFIX}${sysroot}/usr"
+		--syslibdir="${EPREFIX}${sysroot}/lib"
+		--disable-gcc-wrapper
+	)
+	if use mimalloc ; then
+		myconf+=( --with-malloc=external )
+	fi
+
+	./configure "${myconf[@]}" || die
 }
 
 src_compile() {
 	emake obj/include/bits/alltypes.h
 	just_headers && return 0
 
-	emake
+	local emakeargs=()
+	if use mimalloc ; then
+		emakeargs+=(
+			MIMALLOC_DIR="${WORKDIR}/mimalloc-${MIMALLOC_PV}"
+			OBJCOPY="$(tc-getOBJCOPY)"
+			NM="$(tc-getNM)"
+			READELF="$(tc-getREADELF)"
+		)
+	fi
+
+	emake "${emakeargs[@]}"
 	if ! is_crosspkg ; then
 		emake -C "${T}" getconf getent iconv \
 			CC="$(tc-getCC)" \
@@ -166,7 +167,18 @@ src_compile() {
 src_install() {
 	local target="install"
 	just_headers && target="install-headers"
-	emake DESTDIR="${D}" ${target}
+
+	local emakeargs=()
+	if use mimalloc ; then
+		emakeargs+=(
+			MIMALLOC_DIR="${WORKDIR}/mimalloc-${MIMALLOC_PV}"
+			OBJCOPY="$(tc-getOBJCOPY)"
+			NM="$(tc-getNM)"
+			READELF="$(tc-getREADELF)"
+		)
+	fi
+
+	emake DESTDIR="${D}" "${emakeargs[@]}" ${target}
 	just_headers && return 0
 
 	# musl provides ldd via a sym link to its ld.so

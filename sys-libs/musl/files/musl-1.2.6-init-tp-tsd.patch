@@ -1,0 +1,37 @@
+diff --git a/src/env/__init_tls.c b/src/env/__init_tls.c
+index a93141e..c3d3894 100644
+--- a/src/env/__init_tls.c
++++ b/src/env/__init_tls.c
+@@ -14,6 +14,12 @@ volatile int __thread_list_lock;
+ int __init_tp(void *p)
+ {
+ 	pthread_t td = p;
++	if (libc.can_do_threads) {
++		pthread_t old = __pthread_self();
++		td->tsd_used = old->tsd_used;
++		td->malloc_tls[0] = old->malloc_tls[0];
++		td->malloc_tls[1] = old->malloc_tls[1];
++	}
+ 	td->self = td;
+ 	int r = __set_thread_area(TP_ADJ(p));
+ 	if (r < 0) return -1;
+@@ -24,6 +30,7 @@ int __init_tp(void *p)
+ 	td->robust_list.head = &td->robust_list.head;
+ 	td->sysinfo = __sysinfo;
+ 	td->next = td->prev = td;
++	td->tsd = __pthread_tsd_main;
+ 	return 0;
+ }
+ 
+diff --git a/src/internal/pthread_impl.h b/src/internal/pthread_impl.h
+index de2b9d8..e5e8537 100644
+--- a/src/internal/pthread_impl.h
++++ b/src/internal/pthread_impl.h
+@@ -34,6 +34,7 @@ struct pthread {
+ 	/* Part 2 -- implementation details, non-ABI. */
+ 	int tid;
+ 	int errno_val;
++	void *malloc_tls[2];
+ 	volatile int detach_state;
+ 	volatile int cancel;
+ 	volatile unsigned char canceldisable, cancelasync;

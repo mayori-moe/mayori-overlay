@@ -1,171 +1,252 @@
 /*
- * mimalloc as musl's system allocator (optimized variant).
+ * Glue translation unit for embedding mimalloc (v3.7+) into musl libc via
+ * --with-malloc=external without modifying upstream mimalloc sources.
  */
 
-/* ------------------------------------------------------------------------- */
-/* musl integration internals                                                */
-/* ------------------------------------------------------------------------- */
-
-/* The internal musl headers use the hidden macro that is normally provided by
- * musl's src/include/features.h.  We deliberately do not use that header for
- * mimalloc (it also defines a `weak` macro which would hijack the token used
- * in mimalloc's attributes), so provide the attribute macro here. */
-#ifndef hidden
-#define hidden __attribute__((__visibility__("hidden")))
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
 #endif
 
-/* Needed for the inlined pthread TSD accessor below. */
-#include "pthread_impl.h"
-
-/* musl's internal syscall.h defines these as macros; mimalloc includes the
- * public headers, which declare the real functions. */
-#undef syscall
-#undef socketcall
-#undef syscall_cp
-
-/* The allocation fast path reads the per-thread theap through a pthread key.
- * Calling the public pthread_getspecific() on every malloc/free is expensive;
- * inline the exact same access.  `self->tsd` is guaranteed to be set whenever
- * a mimalloc key is valid (see the constructor comments below). */
-#define MI_PTHREAD_GETSPECIFIC(key) ((void *)__pthread_self()->tsd[(key)])
-
-/* ------------------------------------------------------------------------- */
-/* mimalloc configuration                                                    */
-/* ------------------------------------------------------------------------- */
-
-#define MI_NO_GETENV 1
+/* Configure mimalloc for embedding directly inside musl libc */
+#define MI_LIBC_MUSL               1
+#define MI_TLS_MODEL_FIXED         1
+#define MI_TLS_MODEL_FIXED_DEFAULT 0
+#define MI_TLS_MODEL_FIXED_CACHED  1
+#define MI_NO_CXX_NEW_HANDLER      1
+#define MI_NO_PTHREAD_ATFORK       1
+#define MI_NO_GETENV               1
 #define MI_PRIM_HAS_PROCESS_ATTACH 1
-
-#include "static.c"
-
-/* We must not fall back to the __thread based thread id helper: libc.so has
- * no usable PT_TLS module of its own. */
-#if defined(MI_NO_THREAD_POINTER)
-#error "musl+mimalloc requires a thread pointer primitive on this architecture"
+#define MI_SKIP_COLLECT_ON_EXIT    1
+#define MI_PROFILE                 0
+#define MI_STATS                   0
+#define MI_BUILD_RELEASE           1
+#ifndef NDEBUG
+#define NDEBUG                     1
 #endif
 
+#include <errno.h>
+#include <malloc.h>
+#include <pthread.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+/* musl internal headers */
 #include "dynlink.h"
 #include "fork_impl.h"
+#include "libc.h"
+#include "pthread_impl.h"
 
-#define MUSL_EXPORT __attribute__((visibility("default")))
+/*
+ * Undefine musl internal convenience macros that collide with identifiers
+ * inside upstream mimalloc (e.g., mi_random_ctx_t::weak, syscall()).
+ */
+#undef weak
+#undef syscall
 
-/* ------------------------------------------------------------------------- */
-/* allocator entry points                                                    */
-/* ------------------------------------------------------------------------- */
+/*
+ * Fast fixed per-thread heap slots stored directly in struct pthread
+ * (non-ABI Part 2, cache-line 0 alongside self/canary/tid/errno_val).
+ * Preserved across ldso's initial_tls replacement in __init_tp().
+ */
+#define MI_PRIM_THREAD_POINTER() (__pthread_self()->malloc_tls)
 
-MUSL_EXPORT void *malloc(size_t n)
+/*
+ * Stable per-thread identifier for mimalloc:
+ *
+ * - Cannot use self->tid: PID 1 in containers has tid == 1, which violates
+ *   (tid > MI_THREAD_ID_DETACHED) and ((tid & 3) == 0); tid also changes on
+ *   fork().
+ * - Cannot use (uintptr_t)__pthread_self(): ldso replaces builtin_tls with
+ *   initial_tls in dynlink.c, which changes the main thread's struct pthread
+ *   address after early allocations have already occurred.
+ * - __pthread_self()->tsd is initialized to __pthread_tsd_main in __init_tp()
+ *   for the main thread (stable across initial_tls replacement and fork()),
+ *   and to a unique >=16-byte-aligned per-thread array in pthread_create.c for
+ *   every worker thread. Its address is always > MI_THREAD_ID_DETACHED and has
+ *   the bottom 2 bits clear.
+ * - On x86_64 (!TLS_ABOVE_TP), struct pthread begins at %fs:0, so reading via
+ *   __seg_fs compiles to a single `xorq %fs:ofs, %reg` in mi_free().
+ */
+#if defined(__x86_64__) && defined(__SEG_FS) && !defined(TLS_ABOVE_TP)
+#define MI_PRIM_THREAD_ID() \
+	((mi_thread_id_t)(uintptr_t)(*(void *const __seg_fs *)offsetof(struct pthread, tsd)))
+#else
+#define MI_PRIM_THREAD_ID() ((mi_thread_id_t)(uintptr_t)__pthread_self()->tsd)
+#endif
+
+/* Inline pthread_getspecific() for auxiliary thread-local lookups */
+#define pthread_getspecific(k) ((void *)__pthread_self()->tsd[(k)])
+
+/* Bind internal pthread operations directly to musl's hidden entrypoints */
+#define pthread_key_create    __pthread_key_create
+#define pthread_key_delete    __pthread_key_delete
+#define pthread_mutex_lock    __pthread_mutex_lock
+#define pthread_mutex_trylock __pthread_mutex_trylock
+#define pthread_mutex_unlock  __pthread_mutex_unlock
+
+/*
+ * Include upstream mimalloc unity build WITHOUT visibility push(hidden), so
+ * system headers/externs included by mimalloc (environ, getauxval, getrusage,
+ * prctl, sysinfo, ...) keep DEFAULT visibility and do not hide libc.so exports.
+ * Internal mimalloc definitions are localized afterwards via objcopy
+ * --keep-global-symbol=... (and intra-TU calls avoid PLT/GOT via
+ * -fno-semantic-interposition).
+ *
+ * Mirrors mimalloc/src/static.c while scoping MI_TLS_MODEL_PTHREADS strictly
+ * around util/threadlocal.c so its auxiliary slots do not emit __thread (.tbss)
+ * in libc.so while the hot allocation path uses MI_TLS_MODEL_FIXED.
+ */
+#include "mimalloc.h"
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundef"
+#endif
+
+#include "prim/os.c"
+#include "prim/prim.c"
+#include "prim/prim-tls.c"
+
+#include "util/libc.c"
+#include "util/memid.c"
+#include "util/options.c"
+#include "util/random.c"
+#include "util/stats.c"
+
+#define MI_TLS_MODEL_PTHREADS 1
+#include "util/threadlocal.c"
+#undef MI_TLS_MODEL_PTHREADS
+
+#include "arena/arena.c"
+#include "arena/arena-alloc.c"
+#include "arena/arena-page.c"
+#include "arena/arena-page-alloc.c"
+#include "arena/arena-heap.c"
+#include "arena/bitmap-chunk.c"
+#include "arena/bitmap.c"
+
+#include "alloc/alloc.c"
+#include "alloc/alloc-generic.c"
+#include "alloc/alloc-aligned.c"
+#include "alloc/alloc-posix.c"
+#include "alloc/page.c"
+#include "alloc/page-queue.c"
+
+#include "heap/heap.c"
+#include "heap/process.c"
+#include "heap/page-map.c"
+#include "heap/subproc.c"
+#include "heap/theap.c"
+
+#include "profile/sample-guarded.c"
+#include "profile/sample-profile.c"
+#include "profile/pprof.c"
+#include "profile/pprof-os.c"
+#include "profile/pprof-write.c"
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
+/* Restore macro names for any following code */
+#undef pthread_getspecific
+#undef pthread_key_create
+#undef pthread_key_delete
+#undef pthread_mutex_lock
+#undef pthread_mutex_trylock
+#undef pthread_mutex_unlock
+
+/*
+ * Process attach hook (replaces mimalloc's default constructor/destructor).
+ * Deliberately omit a destructor: as the system libc, libc.so is never
+ * unloaded before _Exit(), and musl's __stdio_exit() runs after .fini_array.
+ */
+static void __attribute__((constructor(101))) mimalloc_process_attach(void)
 {
-	return mi_malloc(n);
+	_mi_auto_process_init();
+	__pthread_self()->tsd_used = 1;
 }
 
-void *__libc_malloc(size_t n)
-{
-	return mi_malloc(n);
-}
+/* --------------------------------------------------------------------------
+ * musl internal hidden allocator entrypoints
+ * Direct ELF aliases avoid extra jmp thunks and duplicate inlined code while
+ * preserving mimalloc's mi_decl_func_align alignment on every hot entry.
+ * -------------------------------------------------------------------------- */
 
-void *__libc_malloc_impl(size_t n)
-{
-	return mi_malloc(n);
-}
+#define mimalloc_alias_hidden(target, name) \
+	extern __typeof(target) name __attribute__((__alias__(#target), __visibility__("hidden")))
 
-void __libc_free(void *p)
-{
-	mi_free(p);
-}
+#define mimalloc_export_weak(target, name) \
+	extern __typeof(target) name __attribute__((__weak__, __alias__(#target), __visibility__("default")))
 
-void *__libc_realloc(void *p, size_t n)
-{
-	return mi_realloc(p, n);
-}
+mimalloc_alias_hidden(mi_malloc,  __libc_malloc_impl);
+mimalloc_alias_hidden(mi_malloc,  __libc_malloc);
+mimalloc_alias_hidden(mi_calloc,  __libc_calloc);
+mimalloc_alias_hidden(mi_realloc, __libc_realloc);
+mimalloc_alias_hidden(mi_free,    __libc_free);
 
-/* musl's calloc() would otherwise be malloc + memset.  Go through mi_calloc
- * so mimalloc can use its zero-initialized page paths. */
-static void *musl_mimalloc_calloc(size_t m, size_t n)
+hidden void __malloc_donate(char *start, char *end)
 {
-	if (n != 0 && m > (size_t)-1 / n) {
-		errno = ENOMEM;
-		return NULL;
-	}
-	void *p = mi_calloc(m, n);
-	if (!p && m != 0 && n != 0) errno = ENOMEM;
-	return p;
-}
-
-MUSL_EXPORT void *calloc(size_t m, size_t n)
-{
-	return musl_mimalloc_calloc(m, n);
-}
-
-void *__libc_calloc(size_t m, size_t n)
-{
-	return musl_mimalloc_calloc(m, n);
-}
-
-MUSL_EXPORT void *aligned_alloc(size_t align, size_t len)
-{
-	if (align == 0 || (align & (align - 1)) != 0) {
-		errno = EINVAL;
-		return NULL;
-	}
-	void *p = mi_malloc_aligned(len, align);
-	if (!p) errno = ENOMEM;
-	return p;
-}
-
-MUSL_EXPORT size_t malloc_usable_size(void *p)
-{
-	return mi_usable_size(p);
+	(void)start;
+	(void)end;
 }
 
 hidden void __malloc_atfork(int who)
 {
-	(void)who;
-}
-
-hidden void __malloc_donate(char *a, char *b)
-{
-	(void)a;
-	(void)b;
-}
-
-/* ------------------------------------------------------------------------- */
-/* process / thread lifecycle                                                */
-/* ------------------------------------------------------------------------- */
-
-__attribute__((constructor(101)))
-static void mimalloc_process_attach(void)
-{
-	pthread_t self = __pthread_self();
-
-	/* If mimalloc was initialised while the dynamic linker was loading
-	 * libraries, it may have created pthread keys.  If the linker then
-	 * replaced the static TLS block, the new struct pthread has a NULL tsd
-	 * pointer and pthread_{get,set}specific() would fault.  musl itself
-	 * avoids creating keys before that point; do the same repair that
-	 * __pthread_key_create() would do.  (The key values themselves live in
-	 * the process-global __pthread_tsd_main array and are not lost.) */
-	if (!self->tsd) self->tsd = __pthread_tsd_main;
-
-	mi_process_init();
-
-	/* In the TLS-was-replaced case mimalloc's thread state lives in the
-	 * pthread key values (which we kept reachable above).  The thread id,
-	 * however, is derived from the thread pointer and therefore changed.
-	 * It is the same kernel thread, so update the owning tld. */
-	mi_theap_t *theap = _mi_theap_default();
-	if (theap != NULL && mi_theap_is_initialized(theap)) {
-		mi_thread_id_t tid = _mi_thread_id();
-		if (theap->tld != NULL && theap->tld->thread_id != tid)
-			theap->tld->thread_id = tid;
+	if (who > 0 && _mi_process.process_is_initialized) {
+		_mi_fork_child();
 	}
-
-	mi_thread_init();
-
-	_mi_auto_process_init();
 }
 
-__attribute__((destructor(101)))
-static void mimalloc_process_detach(void)
+/* --------------------------------------------------------------------------
+ * Public interposable allocator entrypoints (weak + default visibility so
+ * both dynamic interposition and static allocator replacement work cleanly)
+ * -------------------------------------------------------------------------- */
+
+static __attribute__((__noinline__, __cold__))
+void *mimalloc_calloc_replaced(size_t m, size_t n, void *(*fn)(size_t))
 {
-	_mi_auto_process_done();
+	if (n && m > (size_t)-1 / n) {
+		errno = ENOMEM;
+		return 0;
+	}
+	n *= m;
+	void *p = fn(n);
+	if (!p) return 0;
+	return memset(p, 0, n);
 }
+
+static mi_decl_func_align void *mimalloc_calloc(size_t m, size_t n)
+{
+	void *(*cur_malloc)(size_t) = malloc;
+	__asm__("" : "+r"(cur_malloc));
+	if (__builtin_expect(__malloc_replaced, 0) ||
+	    __builtin_expect(cur_malloc != __libc_malloc_impl, 0))
+		return mimalloc_calloc_replaced(m, n, cur_malloc);
+	return mi_calloc(m, n);
+}
+
+static __attribute__((__noinline__, __cold__))
+void *mimalloc_aligned_alloc_replaced(void)
+{
+	errno = ENOMEM;
+	return 0;
+}
+
+static mi_decl_func_align void *mimalloc_aligned_alloc(size_t align, size_t len)
+{
+	if (__builtin_expect(__malloc_replaced && !__aligned_alloc_replaced, 0))
+		return mimalloc_aligned_alloc_replaced();
+	return mi_aligned_alloc(align, len);
+}
+
+mimalloc_export_weak(mi_malloc,              malloc);
+mimalloc_export_weak(mimalloc_calloc,        calloc);
+mimalloc_export_weak(mi_realloc,             realloc);
+mimalloc_export_weak(mi_free,                free);
+mimalloc_export_weak(mimalloc_aligned_alloc, aligned_alloc);
+extern size_t malloc_usable_size(void *)
+	__attribute__((__weak__, __alias__("mi_usable_size"), __visibility__("default")));

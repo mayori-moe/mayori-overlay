@@ -1,75 +1,120 @@
+diff --git a/Makefile b/Makefile
+index 3ad88b3..b338a01 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -18,6 +18,14 @@
+@@ -18,7 +18,8 @@ libdir = $(prefix)/lib
  syslibdir = /lib
  
  MALLOC_DIR = mallocng
-+
-+# Support for an externally built allocator (--with-malloc=external).
-+# MALLOC_DIR is set from config.mak, so use recursively expanded variables.
-+MIMALLOC_DIR ?= $(srcdir)/mimalloc
-+MIMALLOC_GLUE ?= $(srcdir)/mimalloc-glue.c
-+EXTRA_OBJ = $(if $(filter external,$(MALLOC_DIR)),obj/mimalloc.o)
-+EXTERNAL_MALLOC_OBJS = $(if $(filter external,$(MALLOC_DIR)),src/malloc/lite_malloc.o src/malloc/calloc.o src/malloc/libc_calloc.o)
-+
- SRC_DIRS = $(addprefix $(srcdir)/,src/* src/malloc/$(MALLOC_DIR) crt ldso $(COMPAT_SRC_DIRS))
+-SRC_DIRS = $(addprefix $(srcdir)/,src/* src/malloc/$(MALLOC_DIR) crt ldso $(COMPAT_SRC_DIRS))
++MALLOC_SRC_DIR = $(if $(filter external,$(MALLOC_DIR)),,src/malloc/$(MALLOC_DIR))
++SRC_DIRS = $(addprefix $(srcdir)/,src/* $(MALLOC_SRC_DIR) crt ldso $(COMPAT_SRC_DIRS))
  BASE_GLOBS = $(addsuffix /*.c,$(SRC_DIRS))
  ARCH_GLOBS = $(addsuffix /$(ARCH)/*.[csS],$(SRC_DIRS))
-@@ -26,7 +34,7 @@
- BASE_OBJS = $(patsubst $(srcdir)/%,%.o,$(basename $(BASE_SRCS)))
- ARCH_OBJS = $(patsubst $(srcdir)/%,%.o,$(basename $(ARCH_SRCS)))
- REPLACED_OBJS = $(sort $(subst /$(ARCH)/,/,$(ARCH_OBJS)))
--ALL_OBJS = $(addprefix obj/, $(filter-out $(REPLACED_OBJS), $(sort $(BASE_OBJS) $(ARCH_OBJS))))
-+ALL_OBJS = $(addprefix obj/, $(filter-out $(REPLACED_OBJS) $(EXTERNAL_MALLOC_OBJS), $(sort $(BASE_OBJS) $(ARCH_OBJS))))
+ BASE_SRCS = $(sort $(wildcard $(BASE_GLOBS)))
+@@ -54,6 +55,9 @@ LDFLAGS_ALL = $(LDFLAGS_AUTO) $(LDFLAGS)
  
- LIBC_OBJS = $(filter obj/src/%,$(ALL_OBJS)) $(filter obj/compat/%,$(ALL_OBJS))
- LDSO_OBJS = $(filter obj/ldso/%,$(ALL_OBJS:%.o=%.lo))
-@@ -88,9 +96,9 @@
+ AR      = $(CROSS_COMPILE)ar
+ RANLIB  = $(CROSS_COMPILE)ranlib
++OBJCOPY = $(CROSS_COMPILE)objcopy
++NM      = $(CROSS_COMPILE)nm
++READELF = $(CROSS_COMPILE)readelf
+ INSTALL = $(srcdir)/tools/install.sh
  
+ ARCH_INCLUDES = $(wildcard $(srcdir)/arch/$(ARCH)/bits/*.h)
+@@ -86,11 +90,45 @@ all:
+ 
+ else
+ 
++ifeq ($(MALLOC_DIR),external)
++EXT_MALLOC_SKIP = obj/src/malloc/calloc.o obj/src/malloc/libc_calloc.o \
++	obj/src/malloc/free.o obj/src/malloc/realloc.o obj/src/malloc/lite_malloc.o
++LIBC_OBJS := $(filter-out $(EXT_MALLOC_SKIP),$(LIBC_OBJS))
++EXT_MALLOC_OBJ ?= obj/mimalloc.o
++MIMALLOC_DIR ?= $(srcdir)/../mimalloc
++MIMALLOC_GLUE ?= $(srcdir)/src/malloc/external/mimalloc-glue.c
++MIMALLOC_VERIFY ?= $(srcdir)/src/malloc/external/verify-syms.sh
++MIMALLOC_CFLAGS ?= -std=gnu11 -fPIC \
++	-fdata-sections -ffunction-sections -fno-semantic-interposition \
++	-fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free \
++	-D_GNU_SOURCE -D_XOPEN_SOURCE=700 \
++	-I$(srcdir)/arch/$(ARCH) -I$(srcdir)/arch/generic -Iobj/src/internal \
++	-I$(srcdir)/src/include -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include \
++	-I$(MIMALLOC_DIR)/include -I$(MIMALLOC_DIR)/src \
++	-nostdinc -isystem "$$($(CC) -print-file-name=include)" \
++	$(CPPFLAGS) $(CFLAGS) -O3
++
++MIMALLOC_KEEP_SYMS = \
++	--keep-global-symbol=malloc \
++	--keep-global-symbol=calloc \
++	--keep-global-symbol=realloc \
++	--keep-global-symbol=free \
++	--keep-global-symbol=aligned_alloc \
++	--keep-global-symbol=malloc_usable_size \
++	--keep-global-symbol=__libc_malloc \
++	--keep-global-symbol=__libc_malloc_impl \
++	--keep-global-symbol=__libc_calloc \
++	--keep-global-symbol=__libc_realloc \
++	--keep-global-symbol=__libc_free \
++	--keep-global-symbol=__malloc_donate \
++	--keep-global-symbol=__malloc_atfork
++endif
++
  all: $(ALL_LIBS) $(ALL_TOOLS)
  
 -OBJ_DIRS = $(sort $(patsubst %/,%,$(dir $(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(GENH) $(GENH_INT))) obj/include)
-+OBJ_DIRS = $(sort $(patsubst %/,%,$(dir $(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(EXTRA_OBJ) $(GENH) $(GENH_INT))) obj/include)
++OBJ_DIRS = $(sort $(patsubst %/,%,$(dir $(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(GENH) $(GENH_INT) $(EXT_MALLOC_OBJ))) obj/include)
  
 -$(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(ALL_OBJS:%.o=%.lo) $(GENH) $(GENH_INT): | $(OBJ_DIRS)
-+$(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(ALL_OBJS:%.o=%.lo) $(EXTRA_OBJ) $(GENH) $(GENH_INT): | $(OBJ_DIRS)
++$(ALL_LIBS) $(ALL_TOOLS) $(ALL_OBJS) $(ALL_OBJS:%.o=%.lo) $(GENH) $(GENH_INT) $(EXT_MALLOC_OBJ): | $(OBJ_DIRS)
  
  $(OBJ_DIRS):
  	mkdir -p $@
-@@ -158,13 +166,32 @@
+@@ -158,14 +196,30 @@ obj/%.lo: $(srcdir)/%.S
  obj/%.lo: $(srcdir)/%.c $(GENH) $(IMPH)
  	$(CC_CMD)
  
 -lib/libc.so: $(LOBJS) $(LDSO_OBJS)
-+# External allocator (mimalloc) as one position independent object.  It is
-+# hosted code, so unlike musl itself it needs GNU extensions and the compiler
-+# provided headers (notably <stdatomic.h>).
-+#
-+# MI_TLS_MODEL_PTHREADS is required: musl does not register the dynamic
-+# linker's own PT_TLS segment (ldso/libc is special-cased in load_library),
-+# so __thread variables in libc.so have no valid TLS module id.  mimalloc's
-+# pthread based TLS model avoids libc TLS entirely.
-+MIMALLOC_CFLAGS = -nostdinc -D_GNU_SOURCE -DMI_TLS_MODEL_PTHREADS=1 \
-+	-I$(srcdir)/arch/$(ARCH) -I$(srcdir)/arch/generic \
-+	-Iobj/src/internal -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include \
-+	-I$(MIMALLOC_DIR)/include -I$(MIMALLOC_DIR)/src
-+
++ifeq ($(MALLOC_DIR),external)
 +obj/mimalloc.o: $(MIMALLOC_GLUE) $(GENH) $(IMPH)
-+	$(CC) $(MIMALLOC_CFLAGS) $(CPPFLAGS) $(CFLAGS_AUTO) $(CFLAGS) \
-+		-std=gnu11 -DNDEBUG -DMI_SECURE=1 -DMI_DEFAULT_ARENA_EAGER_COMMIT=0 -fPIC -fvisibility=hidden -fstack-protector-strong \
-+		-isystem `$(CC) -print-file-name=include` \
-+		-c -o $@ $<
++	$(CC) $(MIMALLOC_CFLAGS) -c -o $@.raw $<
++	$(OBJCOPY) $(MIMALLOC_KEEP_SYMS) -R '.tbss*' $@.raw $@
++	rm -f $@.raw
++	@if [ -f "$(MIMALLOC_VERIFY)" ]; then \
++		NM="$(NM)" READELF="$(READELF)" sh "$(MIMALLOC_VERIFY)" obj $@; \
++	fi
++endif
 +
-+lib/libc.so: $(LOBJS) $(LDSO_OBJS) $(EXTRA_OBJ)
++lib/libc.so: $(LOBJS) $(LDSO_OBJS) $(EXT_MALLOC_OBJ)
  	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -shared \
 -	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(LIBCC)
-+	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(EXTRA_OBJ) $(LIBCC)
++	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(EXT_MALLOC_OBJ) $(LIBCC)
++	@if [ "$(MALLOC_DIR)" = "external" ] && [ -f "$(MIMALLOC_VERIFY)" ]; then \
++		NM="$(NM)" READELF="$(READELF)" sh "$(MIMALLOC_VERIFY)" dso $@; \
++	fi
  
 -lib/libc.a: $(AOBJS)
-+lib/libc.a: $(AOBJS) $(EXTRA_OBJ)
++lib/libc.a: $(AOBJS) $(EXT_MALLOC_OBJ)
  	rm -f $@
 -	$(AR) rc $@ $(AOBJS)
-+	$(AR) rc $@ $(AOBJS) $(EXTRA_OBJ)
++	$(AR) rc $@ $(AOBJS) $(EXT_MALLOC_OBJ)
  	$(RANLIB) $@
++	@if [ "$(MALLOC_DIR)" = "external" ] && [ -f "$(MIMALLOC_VERIFY)" ]; then \
++		NM="$(NM)" READELF="$(READELF)" sh "$(MIMALLOC_VERIFY)" ar $@; \
++	fi
  
  $(EMPTY_LIBS):
+ 	rm -f $@
+diff --git a/configure b/configure
+index bc9fbe4..18c676b 100755
+--- a/configure
++++ b/configure
+@@ -222,7 +222,7 @@ trap 'rm "$tmpc"' EXIT INT QUIT TERM HUP
+ #
+ # Check that the requested malloc implementation exists
+ #
+-test -d "$srcdir/src/malloc/$malloc_dir" \
++test "$malloc_dir" = "external" || test -d "$srcdir/src/malloc/$malloc_dir" \
+ || fail "$0: error: chosen malloc implementation '$malloc_dir' does not exist"
+ 
+ #
